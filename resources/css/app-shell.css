@@ -1,0 +1,539 @@
+/* ═══════════════════════════════════════════════════════════
+   App Shell styles — import this once in resources/css/app.css:
+   @import './app-shell.css';
+   ═══════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+
+/* ─── System-wide typefaces ─────────────────────────────────────
+   Matches Welcome.vue exactly: IBM Plex Sans is the base font for
+   everything (buttons, table headers, table content, labels — the
+   tagline, card titles, and card descriptions on Welcome.vue are
+   all this one font too). Fraunces is reserved for the big serif
+   page title, same treatment as "CLASSLY". IBM Plex Mono stays
+   available for small uppercase eyebrow labels like Welcome.vue's
+   "What Classly Handles", if you want that look somewhere else. */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+:root {
+    --sidebar-collapsed-w: 64px;
+    --sidebar-expanded-w: 240px;
+    --sidebar-bg: #02093f;
+    --sidebar-border: rgba(255, 255, 255, 0.05);
+    --sidebar-duration: 280ms;
+    --sidebar-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --blue-glow: rgba(59, 130, 246, 0.35);
+
+    /* ─── Theme tokens (light) ───────────────────────────────────
+       Same palette as Welcome.vue's light mode (#EAF6FF / #16213E)
+       so pages behind DashboardLayout match the public landing
+       page. DashboardLayout.vue, and the Users Index/Create/Edit
+       pages, already reference these vars — they just needed to
+       be defined somewhere. */
+    --page-bg: #EAF6FF;
+    --card-bg: #ffffff;
+    --card-border: rgba(22, 33, 62, 0.1);
+    --text-primary: #16213E;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+}
+
+/* ─── Theme tokens (dark) ─────────────────────────────────────
+   Matches Welcome.vue's dark mode (#0B1220 / #F3EFE6). The .dark
+   class is toggled on <html> by useAppShell() — the same
+   mechanism ThemeToggle.vue and Welcome.vue already rely on. */
+:root.dark {
+    --page-bg: #0B1220;
+    --card-bg: #151B2E;
+    --card-border: rgba(243, 239, 230, 0.1);
+    --text-primary: #F3EFE6;
+    --text-secondary: #C7CEDD;
+    --text-muted: #8B93A7;
+}
+
+/* ─── Brand font (topbar / logo wordmark) ────────────────────── */
+.brand-font,
+.brand-font * {
+    font-family: 'Poppins', ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ─── Body copy note ──────────────────────────────────────────
+   Actual <p> tags (subtitles, descriptions, error/empty-state text,
+   Welcome.vue's marketing copy, etc.) stay IBM Plex Sans — headings,
+   buttons, labels, badges, and table headers are also IBM Plex Sans
+   from the html-level preflight in tailwind.config.js. Only h1 gets
+   the serif treatment below. */
+
+/* ─── Page titles ─────────────────────────────────────────────
+   Every real <h1> (Academic Terms, Users, Colleges, etc.) gets
+   the same treatment as "CLASSLY" on Welcome.vue. Nothing else
+   changes — everything else in this app, including subtitles,
+   card titles, and descriptions, stays IBM Plex Sans (the base
+   font from tailwind.config.js), matching Welcome.vue's actual
+   design. `.font-sans-override` opts a specific h1 back to the
+   base font if a spot ever needs it. */
+h1 {
+    font-family: 'Fraunces', ui-serif, Georgia, serif;
+}
+h1.font-sans-override {
+    font-family: inherit;
+}
+
+/* ─── Table header row ────────────────────────────────────────
+   Same font as the rest of the UI (IBM Plex Sans — matches
+   "Your Friendly Class Scheduler" on Welcome.vue, which is just
+   the site's base font, not a special one). Sized up from the
+   browser default for readability, and forced to a light color
+   in dark mode since several table pages (e.g. Academic Terms)
+   don't yet use the --text-primary token and would otherwise stay
+   dark-on-dark. Pages that already set their own size/weight/color
+   via Tailwind classes keep working as before — class selectors
+   win over this element selector. */
+th {
+    font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+/* ─── Table body content ─────────────────────────────────────── */
+td {
+    font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.875rem;
+}
+
+/* Dark mode: force readable light text on every table, including
+   pages that don't reference --text-primary at all yet. */
+:root.dark th,
+:root.dark td {
+    color: var(--text-primary);
+}
+
+/* ─── Action buttons ─────────────────────────────────────────────
+   Same font as Login on Welcome.vue (IBM Plex Sans, semibold),
+   pill-shaped like Login's rounded-full, color-coded by action so
+   the meaning is consistent everywhere: blue = edit, green = save,
+   red = delete. Drop-in replacement for the old ad-hoc
+   `bg-blue-500 ... rounded` classes — swap those for `.btn-edit`
+   etc. and remove the color/radius utilities from the element. */
+.btn-edit,
+.btn-save,
+.btn-delete,
+.btn-info,
+.btn-neutral {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    padding: 0.5rem 1.25rem;
+    font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: #ffffff;
+    transition: background-color 150ms ease, transform 150ms ease, opacity 150ms ease;
+    border: none;
+    cursor: pointer;
+}
+.btn-edit { background: #2563eb; }
+.btn-edit:hover { background: #1d4ed8; }
+.btn-save { background: #16a34a; }
+.btn-save:hover { background: #15803d; }
+.btn-delete { background: #dc2626; }
+.btn-delete:hover { background: #b91c1c; }
+.btn-info { background: #6366f1; }
+.btn-info:hover { background: #4f46e5; }
+.btn-neutral {
+    background: var(--card-bg);
+    color: var(--text-secondary);
+    border: 1px solid var(--card-border);
+}
+.btn-neutral:hover { color: var(--text-primary); }
+.btn-edit:disabled,
+.btn-save:disabled,
+.btn-delete:disabled,
+.btn-info:disabled,
+.btn-neutral:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ─── Scrollbars ─────────────────────────────────────────────── */
+.custom-scrollbar::-webkit-scrollbar { width: 3px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 99px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+/* ─── Theme-aware scrollbar ───────────────────────────────────
+   Same thin treatment as .custom-scrollbar, but for panels that
+   actually switch between light/dark (roster lists, modals, main
+   content areas) rather than the always-dark sidebar — a fixed
+   dark thumb would go nearly invisible against a dark page bg. */
+.custom-scrollbar-theme::-webkit-scrollbar { width: 5px; }
+.custom-scrollbar-theme::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar-theme::-webkit-scrollbar-thumb { background: var(--card-border); border-radius: 99px; }
+.custom-scrollbar-theme::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ─── Global page scrollbar ────────────────────────────────────
+   Applies the same thin, theme-aware treatment to the main
+   document scrollbar (html/body), since most pages scroll at
+   the page level rather than inside a wrapped panel. */
+html {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: var(--card-border) transparent;
+}
+html::-webkit-scrollbar { width: 5px; }
+html::-webkit-scrollbar-track { background: transparent; }
+html::-webkit-scrollbar-thumb { background: var(--card-border); border-radius: 99px; }
+html::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ─── Native date/time picker icon visibility ─────────────────
+   The browser's built-in calendar/clock icon renders as a light
+   glyph by default, so it's visible against the dark-mode input
+   fill but disappears against the light-mode input fill (see the
+   "calendar/clock not visible in light mode" report). Darken it
+   only in light mode so it stays visible in both themes. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+}
+:root.dark input[type="date"]::-webkit-calendar-picker-indicator,
+:root.dark input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: none;
+}
+
+/* ─── Layout shell ───────────────────────────────────────────── */
+#layout-shell {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* ─── Sidebar ────────────────────────────────────────────────── */
+#app-sidebar {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: var(--sidebar-collapsed-w);
+    min-width: var(--sidebar-collapsed-w);
+    height: 100vh;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    transition: width var(--sidebar-duration) var(--sidebar-ease),
+                min-width var(--sidebar-duration) var(--sidebar-ease);
+    will-change: width;
+    z-index: 50;
+    overflow: hidden;
+}
+
+#app-sidebar.is-expanded,
+#app-sidebar:hover {
+    width: var(--sidebar-expanded-w);
+    min-width: var(--sidebar-expanded-w);
+}
+
+/* ─── Label reveal ───────────────────────────────────────────── */
+.nav-label {
+    opacity: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    max-width: 0;
+    transition: opacity 200ms ease 60ms,
+                max-width var(--sidebar-duration) var(--sidebar-ease);
+    pointer-events: none;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+#app-sidebar.is-expanded .nav-label,
+#app-sidebar:hover .nav-label {
+    opacity: 1;
+    max-width: 180px;
+    pointer-events: auto;
+}
+
+/* ─── Section heading ────────────────────────────────────────── */
+.nav-section-heading {
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: opacity 200ms ease 60ms,
+                max-height var(--sidebar-duration) var(--sidebar-ease);
+}
+#app-sidebar.is-expanded .nav-section-heading,
+#app-sidebar:hover .nav-section-heading {
+    opacity: 1;
+    max-height: 32px;
+}
+
+/* ─── User info strip ────────────────────────────────────────── */
+.sidebar-user-text {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    transition: opacity 200ms ease 60ms,
+                max-width var(--sidebar-duration) var(--sidebar-ease);
+}
+#app-sidebar.is-expanded .sidebar-user-text,
+#app-sidebar:hover .sidebar-user-text {
+    opacity: 1;
+    max-width: 160px;
+}
+
+/* ─── Chevron (submenu arrow) ────────────────────────────────── */
+.nav-chevron {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    transition: opacity 200ms ease 60ms,
+                max-width var(--sidebar-duration) var(--sidebar-ease),
+                transform 200ms ease;
+}
+#app-sidebar.is-expanded .nav-chevron,
+#app-sidebar:hover .nav-chevron {
+    opacity: 1;
+    max-width: 28px;
+}
+.nav-chevron.is-open {
+    transform: rotate(180deg);
+}
+
+/* ─── Pin button ─────────────────────────────────────────────── */
+.pin-btn {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms ease 60ms;
+}
+#app-sidebar.is-expanded .pin-btn,
+#app-sidebar:hover .pin-btn {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ─── Submenu ─────────────────────────────────────────────────
+   Height is driven by content via the 0fr/1fr grid-row trick —
+   no hardcoded max-height, so it never clips regardless of how
+   many children a group has.
+   ──────────────────────────────────────────────────────────── */
+.nav-submenu {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition: grid-template-rows 280ms var(--sidebar-ease),
+                opacity 200ms ease;
+}
+.nav-submenu.is-open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+}
+.nav-submenu-inner {
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* ─── Nav item icon centering ────────────────────────────────── */
+.nav-item-icon {
+    flex-shrink: 0;
+    width: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ─── Active glow ────────────────────────────────────────────── */
+.nav-link-active {
+    background: rgba(59, 130, 246, 0.15) !important;
+    border: 1px solid rgba(59, 130, 246, 0.25) !important;
+    color: #93c5fd !important;
+    box-shadow: 0 0 0 0 transparent;
+}
+
+/* ─── Tooltip (collapsed only) ───────────────────────────────── */
+.nav-tooltip {
+    position: absolute;
+    left: calc(var(--sidebar-collapsed-w) + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: #1e293b;
+    color: #e2e8f0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 8px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    transition: opacity 120ms ease;
+    z-index: 200;
+}
+.nav-link-wrap:hover .nav-tooltip {
+    opacity: 1;
+}
+#app-sidebar.is-expanded .nav-tooltip,
+#app-sidebar:hover .nav-tooltip {
+    display: none;
+}
+
+/* ─── Logo wordmark ──────────────────────────────────────────── */
+.logo-wordmark {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    transition: opacity 200ms ease 60ms,
+                max-width var(--sidebar-duration) var(--sidebar-ease);
+}
+#app-sidebar.is-expanded .logo-wordmark,
+#app-sidebar:hover .logo-wordmark {
+    opacity: 1;
+    max-width: 160px;
+}
+
+/* ─── Mobile overlay ─────────────────────────────────────────── */
+#sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 40;
+    backdrop-filter: blur(2px);
+}
+
+@media (max-width: 768px) {
+    #app-sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        transform: translateX(-100%);
+        transition: transform var(--sidebar-duration) var(--sidebar-ease),
+                    width var(--sidebar-duration) var(--sidebar-ease);
+        width: var(--sidebar-expanded-w) !important;
+        min-width: var(--sidebar-expanded-w) !important;
+    }
+    #app-sidebar.mobile-open {
+        transform: translateX(0);
+    }
+    #app-sidebar.mobile-open .nav-label,
+    #app-sidebar.mobile-open .nav-section-heading,
+    #app-sidebar.mobile-open .sidebar-user-text,
+    #app-sidebar.mobile-open .nav-chevron,
+    #app-sidebar.mobile-open .pin-btn,
+    #app-sidebar.mobile-open .logo-wordmark {
+        opacity: 1;
+        max-width: 200px;
+        max-height: 40px;
+        pointer-events: auto;
+    }
+    #sidebar-overlay.active { display: block; }
+    #layout-content {
+        margin-left: 0 !important;
+    }
+}
+
+/* ─── Main content ───────────────────────────────────────────── */
+#layout-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* ─── Active indicator pip ──────────────────────────────────── */
+.active-pip {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 18px;
+    border-radius: 0 3px 3px 0;
+    background: #3b82f6;
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.7);
+}
+
+/* ─── Subtle noise texture overlay on sidebar ────────────────── */
+#app-sidebar::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    opacity: 0.4;
+    z-index: 0;
+}
+#app-sidebar > * { position: relative; z-index: 1; }
+
+/* ─── Theme Toggle Pill ──────────────────────────────────────── */
+.theme-pill {
+    position: relative;
+    width: 80px;
+    height: 30px;
+    border-radius: 100px;
+    overflow: hidden;
+    cursor: pointer;
+    border: none;
+    padding: 0;
+    flex-shrink: 0;
+    background: transparent;
+}
+.theme-pill:focus-visible {
+    outline: 2px solid rgba(99, 102, 241, 0.6);
+    outline-offset: 2px;
+}
+.theme-pill-bg {
+    position: absolute;
+    inset: 0;
+    border-radius: 100px;
+}
+.theme-pill-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity 0.45s ease;
+}
+.theme-pill-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 100px;
+    pointer-events: none;
+    z-index: 2;
+    transition: box-shadow 0.45s ease;
+}
+.theme-pill-knob {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    overflow: hidden;
+    z-index: 3;
+    transition: left 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+}
+.theme-pill-knob img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity 0.35s ease;
+    border-radius: 50%;
+}
+.theme-pill-glow {
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    z-index: 4;
+    pointer-events: none;
+    transition: box-shadow 0.45s ease;
+}
