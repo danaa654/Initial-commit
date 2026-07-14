@@ -33,7 +33,10 @@ const form = useForm({
     lunch_start_time: props.academicTerm.lunch_start_time,
     lunch_end_time: props.academicTerm.lunch_end_time,
 
-    time_interval: props.academicTerm.time_interval,
+    // Standardized to 30 minutes — no longer editable, and no longer
+    // read from the saved record. Any term previously saved with 15 or
+    // 60 will be normalized to 30 the next time it's edited and saved.
+    time_interval: 30,
 
     monday: props.academicTerm.monday,
     tuesday: props.academicTerm.tuesday,
@@ -196,19 +199,19 @@ function confirmSave() {
 
                 </div>
 
-                <!-- Class Period -->
+                <!-- Semestral Period -->
                 <div class="mb-6">
 
                     <h2 class="flex items-center gap-2 text-lg font-semibold mb-3 pt-6 border-t border-[var(--card-border)] text-[var(--text-primary)]">
                         <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[#D4A62A]/10 text-[#D4A62A]"><CalendarIcon class="h-4 w-4" /></span>
-                        Class Period
+                        Semestral Period
                     </h2>
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
                         <div>
                             <label class="block font-medium mb-1.5 text-sm text-[var(--text-secondary)]">
-                                Class Start
+                                Semestral Start
                             </label>
 
                             <input
@@ -226,7 +229,7 @@ function confirmSave() {
 
                         <div>
                             <label class="block font-medium mb-1.5 text-sm text-[var(--text-secondary)]">
-                                Class End
+                                Semestral End
                             </label>
 
                             <input
@@ -244,7 +247,7 @@ function confirmSave() {
 
                         <!-- Inline hint, in addition to any server-side error -->
                         <p v-if="classDatesInvalid" class="md:col-span-2 text-red-500 text-sm -mt-2">
-                            Class End cannot be before Class Start.
+                            Semestral End cannot be before Semestral Start.
                         </p>
 
                     </div>
@@ -360,25 +363,21 @@ function confirmSave() {
                             Time Interval (minutes)
                         </label>
 
-                        <select
-                            v-model="form.time_interval"
-                            class="w-full rounded-xl border border-[var(--card-border)] bg-[var(--page-bg)] px-3 py-2.5 text-sm text-[var(--text-primary)] transition-all duration-200 focus:border-[#D4A62A] focus:outline-none focus:ring-2 focus:ring-[#D4A62A]/30"
+                        <!-- Standardized to 30 minutes — no longer user-editable.
+                        form.time_interval stays fixed at 30 (see useForm() above),
+                        so nothing downstream changes: GreedyScheduleService/
+                        ScheduleRecommendationService already fall back to
+                        `$term->time_interval ?: 30`, and AcademicTermRequest still
+                        validates against AcademicTerm::TIME_INTERVALS server-side. -->
+                        <div
+                            class="w-full rounded-xl border border-[var(--card-border)] bg-[var(--page-bg)] px-3 py-2.5 text-sm text-[var(--text-secondary)] flex items-center justify-between"
                         >
-                            <option
-                                v-for="interval in TIME_INTERVALS"
-                                :key="interval.value"
-                                :value="interval.value"
-                            >
-                                {{ interval.label }}
-                            </option>
-                        </select>
+                            <span>30 minutes</span>
+                            <span class="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">Fixed</span>
+                        </div>
 
                         <p class="text-[var(--text-muted)] text-sm mt-1">
-                            Controls how finely the scheduler can slice the school day.
-                        </p>
-
-                        <p v-if="form.errors.time_interval" class="text-red-500 text-sm mt-1">
-                            {{ form.errors.time_interval }}
+                            Controls how finely the scheduler can slice the school day. Standardized across all terms.
                         </p>
                     </div>
 
@@ -527,12 +526,12 @@ function confirmSave() {
                     </div>
 
                     <div class="flex justify-between border-b border-[var(--card-border)] pb-2">
-                        <dt class="text-[var(--text-secondary)]">Class Start</dt>
+                        <dt class="text-[var(--text-secondary)]">Semestral Start</dt>
                         <dd class="font-medium text-[var(--text-primary)]">{{ form.class_start_date || '—' }}</dd>
                     </div>
 
                     <div class="flex justify-between">
-                        <dt class="text-[var(--text-secondary)]">Class End</dt>
+                        <dt class="text-[var(--text-secondary)]">Semestral End</dt>
                         <dd class="font-medium text-[var(--text-primary)]">{{ form.class_end_date || '—' }}</dd>
                     </div>
 

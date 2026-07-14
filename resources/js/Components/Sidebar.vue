@@ -40,6 +40,7 @@ const navConfig = [
             { label: 'Academic Terms', route: 'academic-terms.index', icon: '🗓️' },
             { label: 'Academic Structure', route: 'academic-structure.index', icon: '🏫' },
             { label: 'Curriculum', route: 'curriculums.index', icon: '📘' },
+            { label: 'Subjects', route: 'subjects.index', icon: '📚' },
             { label: 'Sections', route: 'sections.index', icon: '🧮' },
         ],
     },
@@ -50,11 +51,6 @@ const navConfig = [
         icon: '🧑‍🏫',
         roles: ['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC'],
         children: [
-            { label: 'Faculty', route: 'faculty.index', icon: '👨‍🏫' },
-            // Kept from the original menu — not in the requested list, but removing it
-            // would hide an existing page. Delete this line if it's no longer needed.
-            { label: 'Subjects', route: 'subjects.index', icon: '📚' },
-           
             { label: 'Rooms', route: 'rooms.index', icon: '🏢' },
             // Visible to the whole group (Admin, Registrar, Dean,
             // Assistant Dean, OIC) — Dean/Assistant Dean/OIC need to

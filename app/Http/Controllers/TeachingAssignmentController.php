@@ -134,12 +134,32 @@ class TeachingAssignmentController extends Controller implements HasMiddleware
                 ))
                 ->orderBy('last_name')
                 ->orderBy('first_name')
-                ->get(),
+                ->get()
+
+                // can_edit gates the Edit button in the faculty detail
+                // panel on this page — mirrors the same rule
+                // FacultyController::update() enforces server-side, so
+                // the button never promises an edit the backend would
+                // then 403 on. canManageFaculty (Admin/Registrar only,
+                // computed separately below) covers Add/Delete instead.
+                ->map(function (Faculty $faculty) {
+                    $faculty->can_edit = FacultyController::canEditFaculty(auth()->user(), $faculty);
+
+                    return $faculty;
+                }),
 
             'departments' => fn () => Department::where('active', true)
                 ->when($departmentId, fn ($query) => $query->where('id', $departmentId))
                 ->orderBy('name')
                 ->get(),
+
+            // Add/Delete Faculty are Admin/Registrar only (matches
+            // FacultyController::middleware()) — gates the "+ Add
+            // Faculty" button and the Delete action in the faculty
+            // detail panel. Edit is gated per-faculty instead via
+            // can_edit above, since Dean/Assistant Dean/OIC can edit
+            // within their own department.
+            'canManageFaculty' => auth()->user()->hasAnyRole(['Admin', 'Registrar']),
 
             // Every Faculty Loading assignment for the active term,
             // with everything the workspace needs to render the

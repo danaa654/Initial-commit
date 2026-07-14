@@ -1,12 +1,14 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { Head, router, usePage } from '@inertiajs/vue3';
 import AssignSubjectModal from './Partials/AssignSubjectModal.vue';
 import CircularLoadIndicator from './Partials/CircularLoadIndicator.vue';
 import OverloadRequestModal from './Partials/OverloadRequestModal.vue';
 import PendingOverloadsPanel from './Partials/PendingOverloadsPanel.vue';
-import { UserGroupIcon } from '@heroicons/vue/24/outline';
+import FacultyFormModal from './Partials/FacultyFormModal.vue';
+import FacultyDeleteModal from '../Faculty/FacultyDeleteModal.vue';
+import { UserGroupIcon, PlusIcon, PencilIcon, TrashIcon } from '@heroicons/vue/24/outline';
 
 const props = defineProps({
     planningTerm: { type: Object, default: null },
@@ -16,6 +18,7 @@ const props = defineProps({
     subjectOfferings: { type: Array, required: true },
     pendingOverloadRequests: { type: Array, default: () => [] },
     recentActivity: { type: Array, default: () => [] },
+    canManageFaculty: { type: Boolean, default: false },
 });
 
 /*
@@ -45,6 +48,45 @@ const search = ref('');
 const departmentFilter = ref('');
 const scopeFilter = ref('');
 const employmentFilter = ref('');
+
+/*
+|--------------------------------------------------------------------------
+| Faculty Add / Edit / Delete — merged in from the old standalone
+| Faculty page. All three now live here as modals; the roster on the
+| left never navigates away.
+|--------------------------------------------------------------------------
+*/
+
+const showFacultyFormModal = ref(false);
+const facultyBeingEdited = ref(null); // null => Add mode, object => Edit mode
+
+function openAddFaculty() {
+    facultyBeingEdited.value = null;
+    showFacultyFormModal.value = true;
+}
+
+function openEditFaculty(faculty) {
+    facultyBeingEdited.value = faculty;
+    showFacultyFormModal.value = true;
+}
+
+function closeFacultyFormModal() {
+    showFacultyFormModal.value = false;
+    facultyBeingEdited.value = null;
+}
+
+const showFacultyDeleteModal = ref(false);
+const facultyBeingDeleted = ref(null);
+
+function openDeleteFaculty(faculty) {
+    facultyBeingDeleted.value = faculty;
+    showFacultyDeleteModal.value = true;
+}
+
+function closeFacultyDeleteModal() {
+    showFacultyDeleteModal.value = false;
+    facultyBeingDeleted.value = null;
+}
 
 const scopeLabels = {
     general: 'General Education',
@@ -281,6 +323,20 @@ const selectedAssignments = computed(() =>
 function selectFaculty(faculty) {
     selectedFacultyId.value = faculty.id;
 }
+
+// After any Inertia visit that refreshes `faculties` (e.g. a
+// successful delete redirecting back to this same page), fall back to
+// the Department Overview if the selected faculty is no longer in the
+// list, rather than rendering a stale/missing selection.
+watch(
+    () => props.faculties,
+    (faculties) => {
+        if (selectedFacultyId.value === null) return;
+        if (!faculties.some((f) => f.id === selectedFacultyId.value)) {
+            selectedFacultyId.value = null;
+        }
+    },
+);
 
 /*
 |--------------------------------------------------------------------------
@@ -717,17 +773,29 @@ function handleUnassign(offering) {
             <!-- ==================== LEFT PANEL: FACULTY ROSTER ==================== -->
             <aside class="flex w-[17.5rem] flex-shrink-0 flex-col border-r border-[var(--card-border)] bg-[var(--card-bg)]">
                 <div class="border-b border-[var(--card-border)] px-4 py-4">
-                    <div class="flex items-center gap-2.5">
-                        <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[#D4A62A]/30 bg-[#D4A62A]/10 text-[#D4A62A]">
-                            <UserGroupIcon class="h-4.5 w-4.5" />
+                    <div class="flex items-center justify-between gap-2.5">
+                        <div class="flex min-w-0 items-center gap-2.5">
+                            <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[#D4A62A]/30 bg-[#D4A62A]/10 text-[#D4A62A]">
+                                <UserGroupIcon class="h-4.5 w-4.5" />
+                            </div>
+                            <div class="min-w-0">
+                                <h1 class="truncate text-lg font-bold [font-family:'Fraunces',serif] text-[var(--text-primary)]">Faculty Loading</h1>
+                                <p class="truncate text-xs text-[var(--text-muted)]">
+                                    <template v-if="planningTerm">{{ planningTerm.display_name }}</template>
+                                    <template v-else>No active academic term set</template>
+                                </p>
+                            </div>
                         </div>
-                        <div class="min-w-0">
-                            <h1 class="truncate text-lg font-bold [font-family:'Fraunces',serif] text-[var(--text-primary)]">Faculty Loading</h1>
-                            <p class="truncate text-xs text-[var(--text-muted)]">
-                                <template v-if="planningTerm">{{ planningTerm.display_name }}</template>
-                                <template v-else>No active academic term set</template>
-                            </p>
-                        </div>
+
+                        <button
+                            v-if="canManageFaculty"
+                            type="button"
+                            class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[#D4A62A] text-white transition hover:bg-[#c29722]"
+                            title="Add Faculty"
+                            @click="openAddFaculty"
+                        >
+                            <PlusIcon class="h-4.5 w-4.5" />
+                        </button>
                     </div>
 
                     <input
@@ -1151,6 +1219,26 @@ function handleUnassign(offering) {
                             </div>
 
                             <div class="flex items-center gap-4">
+                                <div class="flex items-center gap-1.5">
+                                    <button
+                                        v-if="selectedFaculty.can_edit"
+                                        type="button"
+                                        title="Edit Faculty"
+                                        class="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--card-border)] text-[var(--text-secondary)] transition hover:border-blue-400/50 hover:bg-blue-500/10 hover:text-blue-500"
+                                        @click="openEditFaculty(selectedFaculty)"
+                                    >
+                                        <PencilIcon class="h-4 w-4" />
+                                    </button>
+                                    <button
+                                        v-if="canManageFaculty"
+                                        type="button"
+                                        title="Delete Faculty"
+                                        class="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--card-border)] text-[var(--text-secondary)] transition hover:border-red-400/50 hover:bg-red-500/10 hover:text-red-500"
+                                        @click="openDeleteFaculty(selectedFaculty)"
+                                    >
+                                        <TrashIcon class="h-4 w-4" />
+                                    </button>
+                                </div>
                                 <CircularLoadIndicator :percent="loadPercent(selectedFaculty)" :size="72" :stroke-width="7" />
                                 <div class="text-sm">
                                     <p class="text-[var(--text-muted)]">
@@ -1381,6 +1469,21 @@ function handleUnassign(offering) {
             :faculty="selectedFaculty"
             :is-unscoped="isAdminOrRegistrar"
             @close="closeOverloadModal"
+        />
+
+        <!-- ==================== ADD / EDIT FACULTY MODAL ==================== -->
+        <FacultyFormModal
+            :show="showFacultyFormModal"
+            :faculty="facultyBeingEdited"
+            :departments="departments"
+            @close="closeFacultyFormModal"
+        />
+
+        <!-- ==================== DELETE FACULTY MODAL ==================== -->
+        <FacultyDeleteModal
+            :show="showFacultyDeleteModal"
+            :faculty="facultyBeingDeleted"
+            @close="closeFacultyDeleteModal"
         />
     </AppLayout>
 </template>

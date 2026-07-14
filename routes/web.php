@@ -167,18 +167,13 @@ Route::middleware(['auth'])->group(function () {
         | controller's $curriculumItem argument for implicit model
         | binding.
         |
-        | The standalone "index" (a flat, unscoped list of every item
-        | across every curriculum) has been removed — item management
-        | now only happens through the curriculum-scoped "All Subjects"
-        | workspace below (curriculums.items.manage).
-        |
         */
 
         Route::resource('curriculum-items', CurriculumItemController::class)
-            ->except(['show', 'index'])
+            ->except(['show'])
             ->parameters(['curriculum-items' => 'curriculumItem']);
 
-        // Curriculum-scoped "All Subjects" workspace — grouped by year
+        // Curriculum-scoped "Manage Items" workspace — grouped by year
         // level and semester for a single curriculum.
         Route::get('/curriculums/{curriculum}/items', [CurriculumItemController::class, 'manage'])
             ->name('curriculums.items.manage');
@@ -331,7 +326,13 @@ Route::middleware(['auth'])->group(function () {
 
     Route::middleware('role:Admin|Registrar|Dean|Assistant Dean|OIC')->group(function () {
 
-        Route::resource('faculty', FacultyController::class);
+        // index/create/edit/show removed — the Faculty roster,
+        // Add/Edit/Delete are now all handled on the Faculty Loading
+        // page (teaching-assignments.index) via modals. store/update/
+        // destroy stay here since that page's forms POST/PUT/DELETE
+        // straight to these same endpoints.
+        Route::resource('faculty', FacultyController::class)
+            ->except(['index', 'create', 'edit', 'show']);
 
         /*
         |--------------------------------------------------------------------------
@@ -358,7 +359,8 @@ Route::middleware(['auth'])->group(function () {
         | Faculty Delete — Schedule Preview
         |--------------------------------------------------------------------------
         |
-        | Data source for the Delete confirmation modal on Faculty/Index.vue —
+        | Data source for the Delete confirmation modal on the Faculty
+        | Loading page (TeachingAssignments/Index.vue) —
         | lets Admin/Registrar see exactly which scheduled classes a faculty
         | member currently has BEFORE deleting them. Sits in this same route
         | group (so Dean/Assistant Dean/OIC can still reach it without a 403

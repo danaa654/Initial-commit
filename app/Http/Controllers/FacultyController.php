@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\Faculty;
-use App\Models\Department;
 use App\Models\AcademicTerm;
 use App\Models\Schedule;
 use App\Models\SubjectOffering;
@@ -21,22 +20,18 @@ class FacultyController extends Controller implements HasMiddleware
     /**
      * Controller Middleware
      *
-     * Three tiers, unlike Subjects' two — Faculty is department-owned
-     * data (each row belongs to one Department, or none for General
-     * Education), so Edit gets its own tier with a per-row department
-     * check inside edit()/update() rather than being lumped in with
-     * Create/Delete:
+     * Faculty is department-owned data (each row belongs to one
+     * Department, or none for General Education). Reading the roster
+     * (formerly this controller's index()) now happens on the Faculty
+     * Loading page instead — see TeachingAssignmentController::index(),
+     * which is open to Admin, Registrar, Dean, Assistant Dean, and OIC
+     * alike. What's left here is just the three mutating actions:
      *
-     *   - Read (index)             -> Admin, Registrar, Dean,
-     *     Assistant Dean, OIC — everyone can see the full roster
-     *     (needed for Faculty Loading elsewhere), even departments
-     *     they can't edit.
-     *   - Add/Delete (create/
-     *     store/destroy)           -> Admin, Registrar only. Adding is
+     *   - Add/Delete (store/destroy) -> Admin, Registrar only. Adding is
      *     effectively an HR/employee-record action, and deleting
      *     cascades into faculty_subjects/teaching assignments/Schedule
      *     — both stay centralized, same reasoning as Subjects.
-     *   - Edit (edit/update)       -> Admin, Registrar, Dean, Assistant
+     *   - Edit (update)              -> Admin, Registrar, Dean, Assistant
      *     Dean, OIC pass this ROLE check, but canEditFaculty() below
      *     additionally restricts Dean/Assistant Dean/OIC to their own
      *     Department (or a General Education faculty member with no
@@ -53,9 +48,6 @@ class FacultyController extends Controller implements HasMiddleware
                     auth()->user()->hasAnyRole([
                         'Admin',
                         'Registrar',
-                        'Dean',
-                        'Assistant Dean',
-                        'OIC',
                     ]),
                     403,
                     'Unauthorized.'
@@ -63,22 +55,7 @@ class FacultyController extends Controller implements HasMiddleware
 
                 return $next($request);
 
-            }, only: ['index']),
-
-            new Middleware(function ($request, $next) {
-
-                abort_unless(
-                    auth()->user()->hasAnyRole([
-                        'Admin',
-                        'Registrar',
-                    ]),
-                    403,
-                    'Unauthorized.'
-                );
-
-                return $next($request);
-
-            }, only: ['create', 'store', 'destroy', 'deletePreview']),
+            }, only: ['store', 'destroy', 'deletePreview']),
 
             new Middleware(function ($request, $next) {
 
@@ -96,7 +73,7 @@ class FacultyController extends Controller implements HasMiddleware
 
                 return $next($request);
 
-            }, only: ['edit', 'update']),
+            }, only: ['update']),
 
         ];
     }
@@ -118,8 +95,13 @@ class FacultyController extends Controller implements HasMiddleware
      * separate departmentsManaged() relation for someone overseeing
      * more than one department), swap the comparison below accordingly
      * — the role/GenEd logic stays the same either way.
+     *
+     * Public + static: TeachingAssignmentController's index() also
+     * calls this (to compute can_edit per faculty for the merged
+     * Faculty Loading page), so it can no longer be a private instance
+     * method.
      */
-    private function canEditFaculty($user, Faculty $faculty): bool
+    public static function canEditFaculty($user, Faculty $faculty): bool
     {
         if ($user->hasAnyRole(['Admin', 'Registrar'])) {
             return true;
@@ -134,58 +116,6 @@ class FacultyController extends Controller implements HasMiddleware
         }
 
         return $faculty->department_id === $user->department_id;
-    }
-
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
-    {
-        $user = auth()->user();
-
-        $faculties = Faculty::with('department')
-
-            // Powers the destroy() double-confirmation prompt — see
-            // that method and Faculty::schedules().
-            ->withExists(['schedules as has_schedule'])
-
-            ->orderBy('last_name')
-            ->orderBy('first_name')
-            ->get()
-
-            // can_edit is computed here (not left to the frontend) so
-            // the SAME rule in canEditFaculty() governs both what the
-            // Edit button shows for and what update() actually allows
-            // — the frontend check is only ever a convenience, never
-            // the enforcement.
-            ->map(function (Faculty $faculty) use ($user) {
-                $faculty->can_edit = $this->canEditFaculty($user, $faculty);
-
-                return $faculty;
-            });
-
-        return Inertia::render('Faculty/Index', [
-
-            'faculties' => $faculties,
-
-            // Add/Delete are Admin/Registrar only — see middleware().
-            // Sent once for the page rather than per-row since it
-            // doesn't vary faculty-to-faculty the way can_edit does.
-            'canManageFaculty' => $user->hasAnyRole(['Admin', 'Registrar']),
-
-        ]);
-    }
-
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
-    {
-        return Inertia::render('Faculty/Create', [
-            'departments' => Department::where('active', true)
-                ->orderBy('name')
-                ->get(),
-        ]);
     }
 
     /**
@@ -302,7 +232,7 @@ class FacultyController extends Controller implements HasMiddleware
         );
 
         return redirect()
-            ->route('faculty.index')
+            ->route('teaching-assignments.index')
             ->with('success', 'Faculty member added successfully.');
     }
 
@@ -315,34 +245,12 @@ class FacultyController extends Controller implements HasMiddleware
     }
 
     /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(Faculty $faculty)
-    {
-        abort_unless(
-            $this->canEditFaculty(auth()->user(), $faculty),
-            403,
-            'You can only edit faculty in your own department (or General Education faculty).'
-        );
-
-        return Inertia::render('Faculty/Edit', [
-
-            'faculty' => $faculty,
-
-            'departments' => Department::where('active', true)
-                ->orderBy('name')
-                ->get(),
-
-        ]);
-    }
-
-    /**
      * Update the specified resource.
      */
     public function update(Request $request, Faculty $faculty)
     {
         abort_unless(
-            $this->canEditFaculty(auth()->user(), $faculty),
+            self::canEditFaculty(auth()->user(), $faculty),
             403,
             'You can only edit faculty in your own department (or General Education faculty).'
         );
@@ -483,13 +391,14 @@ class FacultyController extends Controller implements HasMiddleware
         );
 
         return redirect()
-            ->route('faculty.index')
+            ->route('teaching-assignments.index')
             ->with('warning', 'Faculty member updated successfully.');
     }
 
     /**
      * What this faculty member is currently assigned to — the data
-     * source for the Delete confirmation modal on Faculty/Index.vue.
+     * source for the Delete confirmation modal on the Faculty Loading
+     * page (TeachingAssignments/Index.vue).
      * Admin/Registrar sees this BEFORE the delete actually happens, so
      * "this faculty already has scheduled classes" isn't just a bare
      * warning — they can see exactly which subjects/sections/times
@@ -601,7 +510,7 @@ class FacultyController extends Controller implements HasMiddleware
         );
 
         return redirect()
-            ->route('faculty.index')
+            ->route('teaching-assignments.index')
             ->with('deleted', 'Faculty member deleted successfully.');
     }
 
