@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\UpdatePlanningAcademicTermRequest;
 use App\Models\AcademicTerm;
 use App\Services\SchedulingWorkspaceService;
+use App\Services\SubjectOfferingGeneratorService;
 use App\Services\ActivityHistoryService;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -39,6 +40,7 @@ class SettingsController extends Controller implements HasMiddleware
     public function __construct(
         private readonly SchedulingWorkspaceService $workspace,
         private readonly \App\Services\TermFinalizationService $finalization,
+        private readonly SubjectOfferingGeneratorService $generator,
     ) {
     }
 
@@ -123,14 +125,30 @@ class SettingsController extends Controller implements HasMiddleware
 
         ActivityHistoryService::recordWorkingTermChanged($term);
 
+        // Catch-up generation: any Regular, Active Section that
+        // doesn't have offerings yet for this Term gets them now —
+        // covers Sections created while no Working Term was set, and
+        // Sections that already existed before auto-generation was
+        // added. See SubjectOfferingGeneratorService::
+        // generateForAllRegularSections() for the full reasoning.
+        // Skipped for an Archived Term (read-only) — same rule
+        // SchedulingWorkspaceService::assertWritable() enforces
+        // everywhere else offerings get written.
+        $message = 'Working Academic Term is now ' . $term->display_name . '.';
+
+        if ($term->status !== 'Archived') {
+            $summary = $this->generator->generateForAllRegularSections($term, $request->user());
+
+            if ($summary['created'] > 0) {
+                $message .= " {$summary['created']} Subject Offering(s) were generated for Sections that didn't have them yet.";
+            }
+        }
+
         // The Topbar switcher does a preserveScroll/preserveState PUT
         // from wherever the user currently is (any page in the app),
         // not necessarily the Settings page — redirecting back() keeps
         // them exactly where they were instead of yanking them to
         // Settings every time they use the quick switcher.
-        return back()->with(
-            'success',
-            'Working Academic Term is now ' . $term->display_name . '.'
-        );
+        return back()->with('success', $message);
     }
 }

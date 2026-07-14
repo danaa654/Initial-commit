@@ -49,6 +49,7 @@ class CurriculumController extends Controller implements HasMiddleware
                 'program.department',
                 'specialization',
             ])
+            ->withCount('curriculumItems')
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('code', 'like', "%{$search}%")

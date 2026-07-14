@@ -279,6 +279,8 @@ function curriculumLabel(curriculum) {
                             <th class="p-4 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Program</th>
                             <th class="p-4 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Academic Year</th>
                             <th class="p-4 text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Effective Year</th>
+                            <th class="p-4 text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]" title="The cohort's expected 4-year coverage span, derived from Effective Year + the Program's duration">Curriculum Span</th>
+                            <th class="p-4 text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Items</th>
                             <th class="p-4 text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Status</th>
                             <th class="p-4 text-center whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Actions</th>
                         </tr>
@@ -321,6 +323,34 @@ function curriculumLabel(curriculum) {
                             <td class="p-4 text-center">
                                 <span class="inline-flex items-center rounded-full bg-[var(--page-bg)] border border-[var(--card-border)] px-2.5 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
                                     {{ curriculum.effective_year }}
+                                </span>
+                            </td>
+
+                            <td class="p-4 text-center">
+                                <span
+                                    v-if="curriculum.curriculum_range"
+                                    class="inline-flex items-center rounded-full bg-[#D4A62A]/10 border border-[#D4A62A]/30 px-2.5 py-0.5 text-xs font-medium text-[#A8790E] dark:text-[#E8C766]"
+                                    title="A.Y. coverage span, e.g. what a printed prospectus cover shows"
+                                >
+                                    A.Y. {{ curriculum.curriculum_range }}
+                                </span>
+                                <span v-else class="text-[var(--text-muted)] text-xs">—</span>
+                            </td>
+
+                            <td class="p-4 text-center">
+                                <span
+                                    v-if="curriculum.curriculum_items_count > 0"
+                                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-medium"
+                                    :title="`${curriculum.curriculum_items_count} Curriculum Item(s)`"
+                                >
+                                    {{ curriculum.curriculum_items_count }} item{{ curriculum.curriculum_items_count === 1 ? '' : 's' }}
+                                </span>
+                                <span
+                                    v-else
+                                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-medium"
+                                    title="No Curriculum Items yet — Sections under this Curriculum won't generate Subject Offerings until Items are added"
+                                >
+                                    No items
                                 </span>
                             </td>
 

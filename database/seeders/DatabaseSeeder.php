@@ -23,7 +23,6 @@ class DatabaseSeeder extends Seeder
             CurriculumSeeder::class,
             AdminUserSeeder::class,
             SubjectSeeder::class,
-            SectionSeeder::class,
             CurriculumItemSeeder::class,
             FacultySeeder::class,
             RoomSeeder::class,

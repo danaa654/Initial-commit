@@ -40,7 +40,6 @@ const navConfig = [
             { label: 'Academic Terms', route: 'academic-terms.index', icon: '🗓️' },
             { label: 'Academic Structure', route: 'academic-structure.index', icon: '🏫' },
             { label: 'Curriculum', route: 'curriculums.index', icon: '📘' },
-            { label: 'Curriculum Items', route: 'curriculum-items.index', icon: '📄' },
             { label: 'Sections', route: 'sections.index', icon: '🧮' },
         ],
     },

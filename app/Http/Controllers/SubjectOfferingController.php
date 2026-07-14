@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\BulkUpdateWeeklyHoursRequest;
-use App\Http\Requests\GenerateSubjectOfferingRequest;
 use App\Models\AcademicTerm;
 use App\Models\Curriculum;
 use App\Models\CurriculumItem;
@@ -80,7 +79,7 @@ class SubjectOfferingController extends Controller implements HasMiddleware
         $search = trim((string) $request->input('search', ''));
 
         return SubjectOffering::with([
-                'section:id,section_code',
+                'section:id,section_code,is_irregular',
                 'subject:id,subject_code,descriptive_title',
                 'program:id,code',
                 'academicTerm:id,status,class_end_date',
@@ -166,12 +165,13 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             'sections' => Section::with('curriculum:id,program_id,specialization_id')
                 ->where('status', 'Active')
                 ->orderBy('section_code')
-                ->get(['id', 'section_code', 'section_name', 'curriculum_id', 'year_level'])
+                ->get(['id', 'section_code', 'section_name', 'curriculum_id', 'year_level', 'is_irregular'])
                 ->map(fn ($section) => [
                     'id' => $section->id,
                     'section_code' => $section->section_code,
                     'section_name' => $section->section_name,
                     'year_level' => $section->year_level,
+                    'is_irregular' => $section->is_irregular,
                     'program_id' => $section->curriculum?->program_id,
                     'specialization_id' => $section->curriculum?->specialization_id,
                 ])
@@ -190,7 +190,6 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             ],
 
             'can' => [
-                'generate' => auth()->user()->can('generate', SubjectOffering::class),
                 'delete' => auth()->user()->hasAnyRole(['Admin', 'Registrar']),
                 // Dean/Assistant Dean/OIC can see Weekly Hours (it's
                 // already in the Hours column below) but never select
@@ -253,132 +252,6 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             'sections' => $sections,
             'generatedAt' => now(),
         ]);
-    }
-
-    public function create()
-    {
-        abort_unless(auth()->user()->can('generate', SubjectOffering::class), 403, 'Unauthorized.');
-
-        return Inertia::render('SubjectOfferings/Generate', [
-
-            'academicTerms' => AcademicTerm::orderByDesc('academic_year')->orderBy('semester')->get(),
-
-            // Generate Subject Offerings is a scheduling module — it
-            // pre-selects the Planning Academic Term, not the Active
-            // one, so a Registrar preparing next semester's offerings
-            // doesn't have to hunt for the right term in the list.
-            'planningAcademicTermId' => $this->workspace->getTermForUser(auth()->user())?->id,
-
-            'curriculums' => Curriculum::with('program', 'specialization')
-                ->where('active', true)
-                ->get()
-                ->map(fn ($curriculum) => [
-                    'id' => $curriculum->id,
-                    'display_name' => $curriculum->display_name,
-                    'has_items' => $curriculum->has_items,
-                    'sections' => Section::where('curriculum_id', $curriculum->id)
-                        ->where('status', 'Active')
-                        ->orderBy('year_level')
-                        ->orderBy('section_letter')
-                        ->get(['id', 'section_code', 'section_name', 'year_level']),
-                ])
-                ->values(),
-
-        ]);
-    }
-
-    public function store(GenerateSubjectOfferingRequest $request)
-    {
-        abort_unless(auth()->user()->can('generate', SubjectOffering::class), 403, 'Unauthorized.');
-
-        $validated = $request->validated();
-
-        $academicTerm = AcademicTerm::findOrFail($validated['academic_term_id']);
-        $curriculum = Curriculum::with('program', 'specialization')->findOrFail($validated['curriculum_id']);
-
-        $this->workspace->assertWritable($academicTerm);
-
-        $summary = $this->generator->generate(
-            $academicTerm,
-            $curriculum,
-            $validated['section_ids'],
-            $request->user()
-        );
-
-        $label = "{$curriculum->display_name} — {$academicTerm->display_name}";
-
-        $response = $this->respondToGenerationSummary($summary, $label, $academicTerm);
-
-        if ($summary['created'] > 0) {
-            AuditLogService::log(
-                action: 'generated',
-                module: 'Subject Offering',
-                model: $academicTerm,
-                description: "Generated {$summary['created']} Subject Offering(s) for {$label}",
-                newValues: [
-                    'curriculum' => $curriculum->display_name,
-                    'academic_term' => $academicTerm->display_name,
-                    'sections' => count($validated['section_ids']),
-                    'created' => $summary['created'],
-                ],
-                recordName: $label,
-            );
-
-            // Activity History milestone — the Timeline cares about "how
-            // many classes got imported for this term," not the row-level
-            // detail Audit Logs already captures above.
-            ActivityHistoryService::recordSubjectOfferingsGenerated(
-                $academicTerm,
-                $summary['created'],
-                ['curriculum' => $curriculum->display_name]
-            );
-
-            $this->notifyDepartmentOfGeneration($curriculum, $academicTerm, auth()->user(), $summary['created']);
-        }
-
-        return $response;
-    }
-
-    /**
-     * Turns a SubjectOfferingGeneratorService::generate() summary into
-     * the redirect + flash message store() sends back. (Previously
-     * shared with the Sections list's one-click generateForSection()
-     * action — removed now that Section::store() auto-generates
-     * offerings on creation instead.)
-     */
-    private function respondToGenerationSummary(array $summary, string $label, AcademicTerm $academicTerm)
-    {
-        if ($summary['created'] === 0) {
-            if ($summary['skipped_existing'] > 0 && $summary['skipped_unresolved'] === 0) {
-                return redirect()
-                    ->route('subject-offerings.index', ['academic_term_id' => $academicTerm->id])
-                    ->with('warning', "{$label} has already been generated — no new Subject Offerings were created.");
-            }
-
-            $message = "No Subject Offerings were generated for {$label}.";
-
-            if ($summary['skipped_unresolved'] > 0) {
-                $message .= " {$summary['skipped_unresolved']} item(s) could not be generated (missing Specialization code).";
-            }
-
-            return redirect()
-                ->route('subject-offerings.index', ['academic_term_id' => $academicTerm->id])
-                ->with('error', $message);
-        }
-
-        $message = "{$summary['created']} Subject Offering(s) generated for {$label}.";
-
-        if ($summary['skipped_existing'] > 0) {
-            $message .= " {$summary['skipped_existing']} already existed and were left untouched.";
-        }
-
-        if ($summary['skipped_unresolved'] > 0) {
-            $message .= " {$summary['skipped_unresolved']} could not be generated (missing Specialization code).";
-        }
-
-        return redirect()
-            ->route('subject-offerings.index', ['academic_term_id' => $academicTerm->id])
-            ->with('success', $message);
     }
 
     /**

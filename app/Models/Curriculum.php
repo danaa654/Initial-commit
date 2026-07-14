@@ -152,7 +152,14 @@ class Curriculum extends Model
 
         $duration = $this->program?->years ?: 4;
 
-        $endYear = (int) $this->effective_year + $duration - 1;
+        // A 4-year Program spans 4 academic years starting at
+        // effective_year — "2023-2024", "2024-2025", "2025-2026",
+        // "2026-2027" — so the printed range's end calendar year is
+        // effective_year + duration, not duration - 1 (that would
+        // undercount by one academic year, e.g. showing "2023-2026"
+        // for a Program that actually runs through the 2026-2027
+        // school year).
+        $endYear = (int) $this->effective_year + $duration;
 
         return "{$this->effective_year}-{$endYear}";
     }

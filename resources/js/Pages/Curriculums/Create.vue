@@ -39,6 +39,23 @@ const selectedSpecialization = computed(() =>
     filteredSpecializations.value.find(s => s.id == form.specialization_id) || null
 )
 
+// Mirrors the backend's Curriculum::getCurriculumRangeAttribute() —
+// same "effective_year + Program duration" math — so the preview
+// shown before saving matches what the Index page will display
+// afterward (e.g. "2023-2027" for a 4-year Program). Falls back to a
+// 4-year duration if the Program's `years` isn't set, same as the
+// backend accessor.
+const curriculumRangePreview = computed(() => {
+    if (!form.effective_year || !selectedProgram.value) {
+        return null
+    }
+
+    const duration = selectedProgram.value.years || 4
+    const endYear = Number(form.effective_year) + duration
+
+    return `${form.effective_year}-${endYear}`
+})
+
 watch(() => form.program_id, () => {
     form.specialization_id = ''
     generateFields()
@@ -77,8 +94,8 @@ function generateFields() {
         }
     }
 
-    code += '-' + form.effective_year
-    name += ' Curriculum ' + form.effective_year
+    code += '-' + (curriculumRangePreview.value ?? form.effective_year)
+    name += ' Curriculum ' + (curriculumRangePreview.value ?? form.effective_year)
 
     form.code = code.toUpperCase()
     form.name = name
@@ -387,6 +404,11 @@ function confirmSave() {
                     <div class="flex justify-between border-b border-[var(--card-border)] pb-2">
                         <dt class="text-[var(--text-muted)]">Effective Year</dt>
                         <dd class="font-medium">{{ form.effective_year }}</dd>
+                    </div>
+
+                    <div v-if="curriculumRangePreview" class="flex justify-between border-b border-[var(--card-border)] pb-2">
+                        <dt class="text-[var(--text-muted)]">Curriculum Span</dt>
+                        <dd class="font-medium">A.Y. {{ curriculumRangePreview }}</dd>
                     </div>
 
                     <div class="flex justify-between">

@@ -20,7 +20,7 @@ use Illuminate\Database\Seeder;
  *   2. BSHM
  *   3. BSTM
  *   4. BSED English
- *   5. BSCRIM - Firearms Identification (curriculum code: BSCRIM-FB-2026)
+ *   5. BSCRIM - Firearms Identification (curriculum code: BSCRIM-FB-2023-2027)
  *   6. BSCRIM - Fingerprint Identification
  *   7. BSCRIM - Lie Detection
  *   8. BSCRIM - Questioned Documents Examination
@@ -125,12 +125,12 @@ class CurriculumItemSeeder extends Seeder
     |
     | Source: "BACHELOR OF SCIENCE IN INFORMATION TECHNOLOGY (BSIT)"
     | CMO No. 25 S. 2015, A.Y. 2023-2027 prospectus PDF.
-    | Curriculum code: BSIT-2026 (per CurriculumSeeder).
+    | Curriculum code: BSIT-2023-2027 (per CurriculumSeeder).
     |
     */
     private function seedBsit(): void
     {
-        $curriculum = Curriculum::where('code', 'BSIT-2026')->firstOrFail();
+        $curriculum = Curriculum::where('code', 'BSIT-2023-2027')->firstOrFail();
 
         $this->attachSubjects($curriculum, [
             // First Year - First Semester
@@ -209,7 +209,7 @@ class CurriculumItemSeeder extends Seeder
     |
     | Source: "BACHELOR OF SCIENCE IN HOSPITALITY MANAGEMENT (BSHM)"
     | CMO No. 62 S. 2017, A.Y. 2023-2027 prospectus PDF.
-    | Curriculum code: BSHM-2026 (per CurriculumSeeder).
+    | Curriculum code: BSHM-2023-2027 (per CurriculumSeeder).
     |
     | Note: the prospectus places GENSOC and ITE in Third Year - First
     | Semester (not First/Second Year) — preserved exactly as printed.
@@ -218,7 +218,7 @@ class CurriculumItemSeeder extends Seeder
     */
     private function seedBshm(): void
     {
-        $curriculum = Curriculum::where('code', 'BSHM-2026')->firstOrFail();
+        $curriculum = Curriculum::where('code', 'BSHM-2023-2027')->firstOrFail();
 
         $this->attachSubjects($curriculum, [
             // First Year - First Semester
@@ -308,7 +308,7 @@ class CurriculumItemSeeder extends Seeder
     |
     | Source: "BACHELOR OF SCIENCE IN TOURISM MANAGEMENT (BSTM)"
     | CMO No. 62 S. 2017, A.Y. 2023-2027 prospectus PDF.
-    | Curriculum code: BSTM-2026 (per CurriculumSeeder).
+    | Curriculum code: BSTM-2023-2027 (per CurriculumSeeder).
     |
     | Same GENSOC/ITE-in-Third-Year pattern as BSHM — preserved as printed.
     | Second Year - Summer uses CurriculumItem::SEMESTER_SUMMER (3).
@@ -316,7 +316,7 @@ class CurriculumItemSeeder extends Seeder
     */
     private function seedBstm(): void
     {
-        $curriculum = Curriculum::where('code', 'BSTM-2026')->firstOrFail();
+        $curriculum = Curriculum::where('code', 'BSTM-2023-2027')->firstOrFail();
 
         $this->attachSubjects($curriculum, [
             // First Year - First Semester
@@ -404,12 +404,12 @@ class CurriculumItemSeeder extends Seeder
     |
     | Source: "BACHELOR OF SECONDARY EDUCATION (BSED), Major in English"
     | CMO No. 75 S. 2017, A.Y. 2023-2027 prospectus PDF.
-    | Curriculum code: BSED-ENG-2026 (per CurriculumSeeder).
+    | Curriculum code: BSED-ENG-2023-2027 (per CurriculumSeeder).
     |
     */
     private function seedBsedEnglish(): void
     {
-        $curriculum = Curriculum::where('code', 'BSED-ENG-2026')->firstOrFail();
+        $curriculum = Curriculum::where('code', 'BSED-ENG-2023-2027')->firstOrFail();
 
         $this->attachSubjects($curriculum, [
             // First Year - First Semester
@@ -626,7 +626,7 @@ class CurriculumItemSeeder extends Seeder
     |
     | Source: "BACHELOR OF SCIENCE IN CRIMINOLOGY (BSCRIM), Major in
     | Firearms Identification" CMO No. 05 S. 2018, A.Y. 2023-2027 PDF.
-    | Curriculum code: BSCRIM-FB-2026 (per CurriculumSeeder — note the
+    | Curriculum code: BSCRIM-FB-2023-2027 (per CurriculumSeeder — note the
     | curriculum uses specialization code "FB" while the subject catalog
     | uses prefix "FAI"; both are correct per their respective seeders).
     |
@@ -639,7 +639,7 @@ class CurriculumItemSeeder extends Seeder
     */
     private function seedBscrimFirearms(): void
     {
-        $curriculum = Curriculum::where('code', 'BSCRIM-FB-2026')->firstOrFail();
+        $curriculum = Curriculum::where('code', 'BSCRIM-FB-2023-2027')->firstOrFail();
 
         $items = $this->bscrimSharedItems(
             'FAI1', 'FAI2', 'FAI3', 'FAI4', 'FAI5', 'FAI6',
@@ -660,7 +660,7 @@ class CurriculumItemSeeder extends Seeder
     |
     | Source: "BACHELOR OF SCIENCE IN CRIMINOLOGY (BSCRIM), Major in
     | Fingerprint Identification" CMO No. 05 S. 2018, A.Y. 2023-2027 PDF.
-    | Curriculum code: BSCRIM-FI-2026 (per CurriculumSeeder).
+    | Curriculum code: BSCRIM-FI-2023-2027 (per CurriculumSeeder).
     |
     | Third Year electives per this program's own prospectus:
     | Y3S1 -> FORENSIC4 (Questioned Documents Examination)
@@ -671,7 +671,7 @@ class CurriculumItemSeeder extends Seeder
     */
     private function seedBscrimFingerprint(): void
     {
-        $curriculum = Curriculum::where('code', 'BSCRIM-FI-2026')->firstOrFail();
+        $curriculum = Curriculum::where('code', 'BSCRIM-FI-2023-2027')->firstOrFail();
 
         $items = $this->bscrimSharedItems(
             'FI1', 'FI2', 'FI3', 'FI4', 'FI5', 'FI6',
@@ -689,7 +689,7 @@ class CurriculumItemSeeder extends Seeder
     |
     | Source: "BACHELOR OF SCIENCE IN CRIMINOLOGY (BSCRIM), Major in Lie
     | Detection" CMO No. 05 S. 2018, A.Y. 2023-2027 PDF.
-    | Curriculum code: BSCRIM-LD-2026 (per CurriculumSeeder).
+    | Curriculum code: BSCRIM-LD-2023-2027 (per CurriculumSeeder).
     |
     | Third Year electives per this program's own prospectus:
     | Y3S1 -> FORENSIC2 (Personal Identification Techniques)
@@ -700,7 +700,7 @@ class CurriculumItemSeeder extends Seeder
     */
     private function seedBscrimLieDetection(): void
     {
-        $curriculum = Curriculum::where('code', 'BSCRIM-LD-2026')->firstOrFail();
+        $curriculum = Curriculum::where('code', 'BSCRIM-LD-2023-2027')->firstOrFail();
 
         $items = $this->bscrimSharedItems(
             'LD1', 'LD2', 'LD3', 'LD4', 'LD5', 'LD6',
@@ -718,7 +718,7 @@ class CurriculumItemSeeder extends Seeder
     |
     | Source: "BACHELOR OF SCIENCE IN CRIMINOLOGY (BSCRIM), Major in
     | Questioned Documents Examination" CMO No. 05 S. 2018, A.Y. 2023-2027
-    | PDF. Curriculum code: BSCRIM-QD-2026 (per CurriculumSeeder).
+    | PDF. Curriculum code: BSCRIM-QD-2023-2027 (per CurriculumSeeder).
     |
     | Third Year electives per this program's own prospectus:
     | Y3S1 -> FORENSIC2 (Personal Identification Techniques)
@@ -729,7 +729,7 @@ class CurriculumItemSeeder extends Seeder
     */
     private function seedBscrimQuestionedDocuments(): void
     {
-        $curriculum = Curriculum::where('code', 'BSCRIM-QD-2026')->firstOrFail();
+        $curriculum = Curriculum::where('code', 'BSCRIM-QD-2023-2027')->firstOrFail();
 
         $items = $this->bscrimSharedItems(
             'QD1', 'QD2', 'QD3', 'QD4', 'QD5', 'QD6',

@@ -7,10 +7,9 @@ use Illuminate\Foundation\Http\FormRequest;
 /**
  * Validates the payload for SubjectOfferingController::bulkUpdateWeeklyHours().
  *
- * Role gating (Admin/Registrar only) happens in the controller, same
- * pattern as GenerateSubjectOfferingRequest — this only validates
- * shape: which Subject Offerings were selected, and what the new
- * weekly hours value should be.
+ * Role gating (Admin/Registrar only) happens in the controller —
+ * this only validates shape: which Subject Offerings were selected,
+ * and what the new weekly hours value should be.
  */
 class BulkUpdateWeeklyHoursRequest extends FormRequest
 {

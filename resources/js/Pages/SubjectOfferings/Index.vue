@@ -7,7 +7,6 @@ import BulkUpdateWeeklyHoursModal from './BulkUpdateWeeklyHoursModal.vue'
 import {
     ClipboardDocumentListIcon,
     PrinterIcon,
-    Cog6ToothIcon,
     TrashIcon,
     ClockIcon,
 } from '@heroicons/vue/24/outline'
@@ -332,15 +331,6 @@ watch(() => props.offerings.data, () => {
                         <PrinterIcon class="h-4 w-4" />
                         Print Class List
                     </button>
-
-                    <Link
-                        v-if="can.generate"
-                        :href="route('subject-offerings.create')"
-                        class="btn-info inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white"
-                    >
-                        <Cog6ToothIcon class="h-4 w-4" />
-                        Generate Subject Offerings
-                    </Link>
                 </div>
             </div>
 
@@ -421,7 +411,7 @@ watch(() => props.offerings.data, () => {
                         >
                             <option value="">All Sections</option>
                             <option v-for="section in filteredSections" :key="section.id" :value="section.id">
-                                {{ section.section_code }}
+                                {{ section.section_code }}{{ section.is_irregular ? ' (Irregular)' : '' }}
                             </option>
                         </select>
                     </div>
@@ -538,6 +528,13 @@ watch(() => props.offerings.data, () => {
                             </td>
                             <td class="px-4 py-3 text-[var(--text-primary)]">
                                 {{ offering.section?.section_code }}
+                                <span
+                                    v-if="offering.section?.is_irregular"
+                                    class="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full bg-[#D4A62A]/10 text-[#D4A62A] text-[10px] font-medium border border-[#D4A62A]/30"
+                                    title="Irregular Section"
+                                >
+                                    Irr
+                                </span>
                             </td>
                             <td class="px-4 py-3 text-[var(--text-primary)]">
                                 <div class="font-medium">{{ offering.subject?.subject_code }}</div>
@@ -591,9 +588,7 @@ watch(() => props.offerings.data, () => {
 
                         <tr v-if="offerings.data.length === 0">
                             <td :colspan="can.bulkUpdateWeeklyHours ? 13 : 12" class="text-center py-8 text-[var(--text-muted)]">
-                                No Subject Offerings found. Try adjusting your filters<template v-if="can.generate">, or
-                                <Link :href="route('subject-offerings.create')" class="underline">generate offerings</Link>
-                                for a Curriculum</template>.
+                                No Subject Offerings found. Try adjusting your filters.
                             </td>
                         </tr>
                     </tbody>

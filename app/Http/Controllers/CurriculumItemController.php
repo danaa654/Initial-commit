@@ -40,28 +40,6 @@ class CurriculumItemController extends Controller implements HasMiddleware
     }
 
     /**
-     * Display a global listing of every curriculum item — Subject and
-     * Practicum/OJT alike — across all curriculums.
-     */
-    public function index()
-    {
-        return Inertia::render('CurriculumItems/Index', [
-
-            'curriculumItems' => CurriculumItem::with([
-                    'curriculum.program',
-                    'curriculum.specialization',
-                    'subject',
-                ])
-                ->orderBy('curriculum_id')
-                ->orderBy('year_level')
-                ->orderBy('semester')
-                ->orderBy('sort_order')
-                ->get(),
-
-        ]);
-    }
-
-    /**
      * Show the form for creating a new curriculum item. Supports an
      * optional ?curriculum_id= query parameter so the "Add Item" action
      * on a curriculum's Manage page can pre-select the curriculum.

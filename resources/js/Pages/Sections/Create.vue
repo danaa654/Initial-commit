@@ -62,9 +62,19 @@ const scopeKey = computed(() =>
     `${form.program_id}_${form.specialization_id || 'null'}_${form.year_level}`
 )
 
-const usedLettersForScope = computed(() =>
-    scopeReady.value ? (props.usedLetters[scopeKey.value] ?? []) : []
-)
+const usedLettersForScope = computed(() => {
+    if (!scopeReady.value) {
+        return []
+    }
+
+    const bucket = props.usedLetters[scopeKey.value]
+
+    if (!bucket) {
+        return []
+    }
+
+    return (form.is_irregular ? bucket.irregular : bucket.regular) ?? []
+})
 
 const availableLetters = computed(() =>
     SECTION_LETTERS.filter(letter => !usedLettersForScope.value.includes(letter))
@@ -100,7 +110,7 @@ watch(() => form.program_id, () => {
 // Auto-select the next available letter whenever the scope changes —
 // keeps the current letter if it's still valid for the new scope,
 // otherwise picks the first free one (or clears it if the scope is full).
-watch([() => form.program_id, () => form.specialization_id, () => form.year_level], () => {
+watch([() => form.program_id, () => form.specialization_id, () => form.year_level, () => form.is_irregular], () => {
     if (!scopeReady.value) {
         return
     }
@@ -149,6 +159,36 @@ function submit() {
     }
 
     form.post(route('sections.store'))
+}
+
+// Whether every field submit() actually needs is already filled in —
+// used to decide whether flipping the Irregular toggle can save right
+// away, versus just recording the intent and waiting for the user to
+// finish the rest of the form.
+const readyToSave = computed(() =>
+    scopeReady.value
+    && !!form.section_letter
+    && !scopeFull.value
+    && !!form.section_name
+    && !!form.capacity
+)
+
+// Flipping Irregular ON is the moment the user wants to see the Subject
+// picker — but that picker needs a real Section id (see
+// IrregularSubjectPicker.vue), which only exists once this record is
+// saved. So instead of making them flip the toggle, then separately
+// click Save Section, then navigate to Edit, we just do that save for
+// them right here and let the backend redirect to Edit (where the
+// picker renders immediately). If the rest of the form isn't filled in
+// yet, we fall back to just toggling the field — Save Section will
+// still land on Edit once they do finish it, thanks to the same
+// backend redirect.
+function toggleIrregular() {
+    form.is_irregular = !form.is_irregular
+
+    if (form.is_irregular && readyToSave.value && !form.processing) {
+        form.post(route('sections.store'))
+    }
 }
 </script>
 
@@ -396,8 +436,16 @@ function submit() {
                             </label>
                             <p class="text-xs text-[var(--text-muted)] mt-1 max-w-sm">
                                 Skips automatic Subject Offering generation from the
-                                curriculum/year level. After saving, you'll be able to
-                                hand-pick Subjects for this section from the Edit page.
+                                curriculum/year level. Subjects are hand-picked instead.
+                                <template v-if="readyToSave">
+                                    Turning this on saves the section right away and
+                                    takes you to the Subject picker.
+                                </template>
+                                <template v-else>
+                                    Fill in the fields above first — once you do,
+                                    turning this on will save and take you straight
+                                    to the Subject picker.
+                                </template>
                             </p>
                         </div>
 
@@ -406,7 +454,7 @@ function submit() {
                             type="button"
                             role="switch"
                             :aria-checked="form.is_irregular"
-                            @click="form.is_irregular = !form.is_irregular"
+                            @click="toggleIrregular"
                             :class="[
                                 'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200',
                                 form.is_irregular ? 'bg-[#D4A62A]' : 'bg-[var(--card-border)]',

@@ -127,7 +127,7 @@ function removeItem(item) {
 
 <template>
 
-<Head :title="`Manage Items — ${curriculum.code}`" />
+<Head :title="`All Subjects — ${curriculum.code}`" />
 
 <div class="relative">
 
@@ -150,10 +150,13 @@ function removeItem(item) {
             </div>
             <div>
                 <h1 class="text-3xl font-bold [font-family:'Fraunces',serif] text-[var(--text-primary)]">
-                    Manage Items
+                    All Subjects
                 </h1>
                 <p class="text-sm text-[var(--text-muted)]">
                     {{ curriculumLabel }}
+                    <span v-if="curriculum.curriculum_range" class="text-[var(--text-muted)]">
+                        · A.Y. {{ curriculum.curriculum_range }}
+                    </span>
                 </p>
             </div>
         </div>

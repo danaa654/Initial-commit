@@ -167,13 +167,18 @@ Route::middleware(['auth'])->group(function () {
         | controller's $curriculumItem argument for implicit model
         | binding.
         |
+        | The standalone "index" (a flat, unscoped list of every item
+        | across every curriculum) has been removed — item management
+        | now only happens through the curriculum-scoped "All Subjects"
+        | workspace below (curriculums.items.manage).
+        |
         */
 
         Route::resource('curriculum-items', CurriculumItemController::class)
-            ->except(['show'])
+            ->except(['show', 'index'])
             ->parameters(['curriculum-items' => 'curriculumItem']);
 
-        // Curriculum-scoped "Manage Items" workspace — grouped by year
+        // Curriculum-scoped "All Subjects" workspace — grouped by year
         // level and semester for a single curriculum.
         Route::get('/curriculums/{curriculum}/items', [CurriculumItemController::class, 'manage'])
             ->name('curriculums.items.manage');
@@ -258,16 +263,12 @@ Route::middleware(['auth'])->group(function () {
         |
         | No resource route here on purpose — there is no update for a
         | single offering (Overall Status is fully derived, not
-        | editable). "create"/"store" are the Generate form, not a
-        | manual record form. Faculty assignment for an offering
-        | happens in Faculty Loading (Teaching Assignments), not here.
+        | editable). Offerings are generated automatically when a
+        | Section is created (see SectionController::store()) — there
+        | is no manual "Generate" form anymore. Faculty assignment for
+        | an offering happens in Faculty Loading (Teaching
+        | Assignments), not here.
         */
-
-        Route::get('subject-offerings/create', [SubjectOfferingController::class, 'create'])
-            ->name('subject-offerings.create');
-
-        Route::post('subject-offerings', [SubjectOfferingController::class, 'store'])
-            ->name('subject-offerings.store');
 
         Route::delete('subject-offerings/{subjectOffering}', [SubjectOfferingController::class, 'destroy'])
             ->name('subject-offerings.destroy');

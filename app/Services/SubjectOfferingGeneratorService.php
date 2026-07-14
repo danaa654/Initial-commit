@@ -114,6 +114,78 @@ class SubjectOfferingGeneratorService
     }
 
     /**
+     * Backfills Subject Offerings for every Regular, Active Section
+     * that doesn't have them yet in this Academic Term — the
+     * catch-up counterpart to the per-Section auto-generate in
+     * SectionController::store().
+     *
+     * Two situations land here:
+     * - A Section was created while no Working Term was set (or the
+     *   Working Term has since changed), so it was never scanned.
+     * - Sections that already existed before auto-generation was
+     *   added at all.
+     *
+     * Called from SettingsController::updateSchedulingWorkspace() —
+     * the single write path for the Working Term — right after it's
+     * set, so every scheduling module opens onto a Term that's
+     * already fully populated instead of needing a manual nudge.
+     * generate() is additive/non-destructive (see its own docblock),
+     * so re-running this for a Term that's already fully generated is
+     * always a safe no-op.
+     *
+     * Sections are grouped by Curriculum so each Curriculum only
+     * costs one generate() call (and one EDP sequence scan) no matter
+     * how many of its Sections are missing offerings, rather than one
+     * call per Section.
+     */
+    public function generateForAllRegularSections(AcademicTerm $academicTerm, User $generatedBy): array
+    {
+        $summary = [
+            'sections_scanned' => 0,
+            'items_matched' => 0,
+            'created' => 0,
+            'skipped_existing' => 0,
+            'skipped_unresolved' => 0,
+        ];
+
+        $sectionsByCurriculum = Section::where('status', 'Active')
+            ->where('is_irregular', false)
+            ->get(['id', 'curriculum_id'])
+            ->groupBy('curriculum_id');
+
+        if ($sectionsByCurriculum->isEmpty()) {
+            return $summary;
+        }
+
+        $curriculums = Curriculum::with('program', 'specialization')
+            ->whereIn('id', $sectionsByCurriculum->keys())
+            ->get()
+            ->keyBy('id');
+
+        foreach ($sectionsByCurriculum as $curriculumId => $sections) {
+
+            $curriculum = $curriculums->get($curriculumId);
+
+            if (! $curriculum) {
+                continue;
+            }
+
+            $curriculumSummary = $this->generate(
+                $academicTerm,
+                $curriculum,
+                $sections->pluck('id')->all(),
+                $generatedBy
+            );
+
+            foreach ($summary as $key => $value) {
+                $summary[$key] += $curriculumSummary[$key];
+            }
+        }
+
+        return $summary;
+    }
+
+    /**
      * Create a single Subject Offering for one (Section, Curriculum
      * Item) pair. Returns false (and creates nothing) if an EDP
      * prefix can't be resolved — e.g. a BSCRIM Curriculum whose

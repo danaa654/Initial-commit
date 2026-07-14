@@ -66,9 +66,19 @@ const scopeKey = computed(() =>
     `${form.program_id}_${form.specialization_id || 'null'}_${form.year_level}`
 )
 
-const usedLettersForScope = computed(() =>
-    scopeReady.value ? (props.usedLetters[scopeKey.value] ?? []) : []
-)
+const usedLettersForScope = computed(() => {
+    if (!scopeReady.value) {
+        return []
+    }
+
+    const bucket = props.usedLetters[scopeKey.value]
+
+    if (!bucket) {
+        return []
+    }
+
+    return (form.is_irregular ? bucket.irregular : bucket.regular) ?? []
+})
 
 const availableLetters = computed(() =>
     SECTION_LETTERS.filter(letter => !usedLettersForScope.value.includes(letter))
@@ -110,7 +120,7 @@ watch(() => form.program_id, () => {
 // Auto-select the next available letter whenever the scope changes —
 // keeps the current letter if it's still valid for the new scope,
 // otherwise picks the first free one (or clears it if the scope is full).
-watch([() => form.program_id, () => form.specialization_id, () => form.year_level], () => {
+watch([() => form.program_id, () => form.specialization_id, () => form.year_level, () => form.is_irregular], () => {
     if (!scopeReady.value) {
         return
     }

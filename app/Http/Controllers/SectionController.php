@@ -199,6 +199,16 @@ class SectionController extends Controller implements HasMiddleware
             $message .= " {$generatedCount} Subject Offering(s) were generated for it automatically.";
         }
 
+        // Irregular Sections have no auto-generated Subject Offerings —
+        // send the user straight to Edit, where the Manually Assigned
+        // Subjects picker lives, instead of back to the Sections list.
+        // Regular Sections keep the original redirect.
+        if ($section->is_irregular) {
+            return redirect()
+                ->route('sections.edit', $section)
+                ->with('success', $message);
+        }
+
         return redirect()
             ->route('sections.index')
             ->with('success', $message);
@@ -575,14 +585,21 @@ class SectionController extends Controller implements HasMiddleware
             $specialization = null;
         }
 
-        // Max 5 sections per Program + Year Level (+ Specialization).
+        // Max 5 sections per Program + Year Level (+ Specialization),
+        // counted separately for Regular vs. Irregular — a scope can
+        // have up to 5 Regular letters AND up to 5 Irregular letters,
+        // since the two are tracked independently (see the migration
+        // that scoped section_code's uniqueness by is_irregular).
         // Checked ahead of the duplicate-code check below so a maxed-out
         // scope gets its own specific message rather than a generic
         // "already exists" one.
+        $isIrregular = (bool) ($validated['is_irregular'] ?? false);
+
         $lettersInScope = $this->lettersInScope(
             $program->id,
             $specialization?->id,
             $validated['year_level'],
+            $isIrregular,
             excludeSectionId: $section?->id
         );
 
@@ -615,7 +632,11 @@ class SectionController extends Controller implements HasMiddleware
             $validated['section_letter']
         );
 
+        // Scoped by is_irregular: "BSIT-1B" is allowed to exist twice —
+        // once Regular, once Irregular — but never twice within the
+        // same track. Matches the DB's composite unique index.
         $duplicate = Section::where('section_code', $sectionCode)
+            ->where('is_irregular', $isIrregular)
             ->when($section, fn ($query) => $query->where('id', '!=', $section->id))
             ->exists();
 
@@ -632,15 +653,17 @@ class SectionController extends Controller implements HasMiddleware
 
     /**
      * Every distinct Section Letter already in use for a given
-     * Program + Year Level (+ Specialization) scope. Used by both the
-     * max-5 check above and usedLetterMap() below — kept as one method
-     * so the "what counts as this scope" definition only lives in one
-     * place.
+     * Program + Year Level (+ Specialization) scope, scoped further by
+     * is_irregular — a Regular "B" and an Irregular "B" don't count
+     * against each other. Used by both the max-5 check above and
+     * usedLetterMap() below — kept as one method so the "what counts as
+     * this scope" definition only lives in one place.
      */
     private function lettersInScope(
         int $programId,
         ?int $specializationId,
         int $yearLevel,
+        bool $isIrregular,
         ?int $excludeSectionId = null
     ): Collection {
         return Section::whereHas('curriculum', function ($query) use ($programId, $specializationId) {
@@ -648,6 +671,7 @@ class SectionController extends Controller implements HasMiddleware
                     ->where('specialization_id', $specializationId);
             })
             ->where('year_level', $yearLevel)
+            ->where('is_irregular', $isIrregular)
             ->when($excludeSectionId, fn ($query) => $query->where('id', '!=', $excludeSectionId))
             ->pluck('section_letter')
             ->filter()
@@ -656,9 +680,12 @@ class SectionController extends Controller implements HasMiddleware
 
     /**
      * Every scope (Program + Specialization + Year Level) mapped to its
-     * currently-used letters, e.g. {"3_null_1": ["A","B"], "5_2_4": ["A"]}.
-     * Sent to the frontend so it can disable taken letters, auto-select
-     * the next free one, and know when a scope is completely full —
+     * currently-used letters, split into 'regular' and 'irregular'
+     * buckets since the two tracks no longer share letter availability,
+     * e.g. {"3_null_1": {"regular": ["A"], "irregular": ["B"]}}. Sent to
+     * the frontend so it can disable taken letters, auto-select the
+     * next free one, and know when a scope is completely full for
+     * whichever track the Irregular toggle currently points at —
      * entirely client-side, no per-change request needed.
      */
     private function usedLetterMap(?int $excludeSectionId = null): array
@@ -672,7 +699,14 @@ class SectionController extends Controller implements HasMiddleware
             ->groupBy(fn (Section $section) => $section->curriculum->program_id
                 . '_' . ($section->curriculum->specialization_id ?? 'null')
                 . '_' . $section->year_level)
-            ->map(fn ($group) => $group->pluck('section_letter')->unique()->values())
+            ->map(function ($group) {
+                return [
+                    'regular' => $group->where('is_irregular', false)
+                        ->pluck('section_letter')->unique()->values(),
+                    'irregular' => $group->where('is_irregular', true)
+                        ->pluck('section_letter')->unique()->values(),
+                ];
+            })
             ->toArray();
     }
 

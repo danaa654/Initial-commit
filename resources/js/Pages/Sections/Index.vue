@@ -279,6 +279,19 @@ function finalizeDelete() {
                                 >
                                     Irregular
                                 </span>
+                                <span
+                                    v-else
+                                    class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-[var(--card-border)]/40 text-[var(--text-secondary)] text-xs font-medium border border-[var(--card-border)]"
+                                >
+                                    Regular
+                                </span>
+                                <span
+                                    v-if="!section.is_irregular && !section.curriculum?.has_items"
+                                    class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-medium"
+                                    title="This Section's Curriculum has no Curriculum Items yet, so it won't generate Subject Offerings until Items are added"
+                                >
+                                    No Curriculum Items
+                                </span>
                             </td>
 
                             <td class="p-4 text-[var(--text-primary)]">
