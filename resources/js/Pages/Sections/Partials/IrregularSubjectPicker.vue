@@ -47,15 +47,42 @@ onMounted(loadSubjects)
 const filteredSubjects = computed(() => {
     const term = search.value.trim().toLowerCase()
 
-    if (!term) {
-        return availableSubjects.value
+    const matches = term
+        ? availableSubjects.value.filter(subject =>
+            subject.subject_code?.toLowerCase().includes(term)
+            || subject.descriptive_title?.toLowerCase().includes(term)
+            || subject.curriculum?.toLowerCase().includes(term)
+        )
+        : availableSubjects.value
+
+    // Ordered 1st Yr -> 4th Yr (then alphabetically by Subject Code
+    // within the same year) so the list reads as a natural curriculum
+    // progression instead of the raw alphabetical order it comes back
+    // in from SubjectOfferingController::irregularSubjects().
+    return [...matches].sort((a, b) => {
+        const yearDiff = (a.year_level ?? 0) - (b.year_level ?? 0)
+        if (yearDiff !== 0) return yearDiff
+
+        return (a.subject_code ?? '').localeCompare(b.subject_code ?? '')
+    })
+})
+
+// Year-level groups (only the years actually present in the filtered
+// results) — powers the sticky "1st Yr" / "2nd Yr" headers in the list
+// below, so subjects read as a clear year-by-year progression rather
+// than one long undifferentiated list.
+const groupedSubjects = computed(() => {
+    const groups = new Map()
+
+    for (const subject of filteredSubjects.value) {
+        const year = subject.year_level ?? 0
+        if (! groups.has(year)) groups.set(year, [])
+        groups.get(year).push(subject)
     }
 
-    return availableSubjects.value.filter(subject =>
-        subject.subject_code?.toLowerCase().includes(term)
-        || subject.descriptive_title?.toLowerCase().includes(term)
-        || subject.curriculum?.toLowerCase().includes(term)
-    )
+    return Array.from(groups.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([year, subjects]) => ({ year, subjects }))
 })
 
 function toggle(curriculumItemId) {
@@ -165,42 +192,50 @@ function attachSelected() {
                 >
             </div>
 
-            <!-- Multi-select list -->
-            <div class="max-h-80 overflow-y-auto rounded-xl border border-[var(--card-border)] divide-y divide-[var(--card-border)]">
+            <!-- Multi-select list, grouped 1st Yr -> 4th Yr -->
+            <div class="max-h-80 overflow-y-auto rounded-xl border border-[var(--card-border)]">
                 <p v-if="!filteredSubjects.length" class="text-sm text-[var(--text-muted)] p-4 text-center">
                     No subjects match your search.
                 </p>
 
-                <label
-                    v-for="subject in filteredSubjects"
-                    :key="subject.curriculum_item_id"
-                    class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-[var(--page-bg)] transition-colors"
-                >
-                    <input
-                        type="checkbox"
-                        :checked="selected.has(subject.curriculum_item_id)"
-                        @change="toggle(subject.curriculum_item_id)"
-                        class="h-4 w-4 rounded border-[var(--card-border)] text-[#D4A62A] focus:ring-[#D4A62A]/30"
-                    >
+                <div v-for="group in groupedSubjects" :key="group.year">
+                    <p class="sticky top-0 z-10 bg-[var(--page-bg)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] border-b border-[var(--card-border)]">
+                        {{ yearLabel(group.year) }}
+                    </p>
 
-                    <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <p class="text-sm font-medium text-[var(--text-primary)]">
-                                {{ subject.subject_code }} — {{ subject.descriptive_title }}
-                            </p>
-                            <span
-                                v-if="subject.curriculum"
-                                class="inline-flex items-center px-1.5 py-0.5 rounded bg-[#D4A62A]/10 text-[#D4A62A] text-[10px] font-semibold uppercase tracking-wide"
+                    <div class="divide-y divide-[var(--card-border)]">
+                        <label
+                            v-for="subject in group.subjects"
+                            :key="subject.curriculum_item_id"
+                            class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-[var(--page-bg)] transition-colors"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="selected.has(subject.curriculum_item_id)"
+                                @change="toggle(subject.curriculum_item_id)"
+                                class="h-4 w-4 rounded border-[var(--card-border)] text-[#D4A62A] focus:ring-[#D4A62A]/30"
                             >
-                                {{ subject.curriculum }}
-                            </span>
-                        </div>
-                        <p class="text-xs text-[var(--text-muted)] truncate">
-                            {{ yearLabel(subject.year_level) }}
-                            <span v-if="subject.units">· {{ subject.units }} unit{{ subject.units === 1 ? '' : 's' }}</span>
-                        </p>
+
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <p class="text-sm font-medium text-[var(--text-primary)]">
+                                        {{ subject.subject_code }} — {{ subject.descriptive_title }}
+                                    </p>
+                                    <span
+                                        v-if="subject.curriculum"
+                                        class="inline-flex items-center px-1.5 py-0.5 rounded bg-[#D4A62A]/10 text-[#D4A62A] text-[10px] font-semibold uppercase tracking-wide"
+                                    >
+                                        {{ subject.curriculum }}
+                                    </span>
+                                </div>
+                                <p class="text-xs text-[var(--text-muted)] truncate">
+                                    {{ yearLabel(subject.year_level) }}
+                                    <span v-if="subject.units">· {{ subject.units }} unit{{ subject.units === 1 ? '' : 's' }}</span>
+                                </p>
+                            </div>
+                        </label>
                     </div>
-                </label>
+                </div>
             </div>
 
             <p v-if="submitError" class="text-red-500 text-sm mt-3">

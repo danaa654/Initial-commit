@@ -4,6 +4,7 @@ import { Head, Link, router } from '@inertiajs/vue3'
 import axios from 'axios'
 import AppLayout from '@/Layouts/AppLayout.vue'
 import BulkUpdateWeeklyHoursModal from './BulkUpdateWeeklyHoursModal.vue'
+import AssignmentDropdown from './AssignmentDropdown.vue'
 import {
     ClipboardDocumentListIcon,
     PrinterIcon,
@@ -18,6 +19,8 @@ const props = defineProps({
     specializations: Array,
     sections: Array,
     statuses: Array,
+    faculties: Array,
+    rooms: Array,
     filters: Object,
     can: Object,
 })
@@ -148,6 +151,162 @@ function destroy(offering) {
     if (! confirm(`Delete Subject Offering ${offering.edp_code}?`)) return
 
     router.delete(route('subject-offerings.destroy', offering.id), { preserveScroll: true })
+}
+
+/*
+|--------------------------------------------------------------------------
+| Faculty Scope Eligibility (mirrors TeachingAssignments/Index.vue's
+| checkEligibility(), which mirrors TeachingAssignmentService's
+| assertFacultyScopeAllowsSubject on the server). This is only a
+| client-side filter so the dropdown only ever OFFERS faculty who could
+| actually be assigned — the server remains the authoritative check via
+| assertBusinessRules() in assignFaculty().
+|
+| Deliberately does NOT check max units here (that needs each faculty's
+| current load across every offering in the term, which this page
+| doesn't otherwise load) — an over-cap pick still gets caught by the
+| server and surfaces as the usual error toast.
+--------------------------------------------------------------------------
+*/
+
+function isFacultyEligible(faculty, offering) {
+    const isMajor = offering.classification === 'Major'
+    const offeringDepartmentId = offering.program?.department_id ?? null
+
+    if (faculty.faculty_scope === 'general' && isMajor) return false
+    if (faculty.faculty_scope === 'departmental' && ! isMajor) return false
+    if (faculty.faculty_scope === 'departmental' && offeringDepartmentId !== faculty.department_id) return false
+    if (faculty.faculty_scope === 'cross_department' && isMajor && offeringDepartmentId !== faculty.department_id) return false
+
+    return true
+}
+
+// Eligible faculty for this offering, PLUS whoever is already assigned
+// (even if a scope/department change since would now make them
+// ineligible) — so the dropdown never silently hides the current
+// selection.
+function facultyOptionsFor(offering) {
+    const currentId = offering.teaching_assignment?.faculty?.id
+
+    return props.faculties.filter(f => f.id === currentId || isFacultyEligible(f, offering))
+}
+
+// Room compatibility — mirrors Room::manageSubjects()/
+// syncPreferredSubjects() server-side: a Lecture offering can only be
+// paired with a Lecture room, a Laboratory offering only a Laboratory
+// room. On top of that, a room must also be available to the
+// offering's Program — General rooms are open to everyone, but a
+// room scoped to specific Programs (e.g. only 'BSIT', or only
+// 'BSCRIM') is otherwise excluded. This mirrors Room::scopeAvailableFor()
+// on the server. Same "keep the current pick visible even if now
+// mismatched" safety as facultyOptionsFor() above.
+function isRoomEligible(room, offering) {
+    if (room.room_type !== offering.room_type) return false
+
+    const groupCodes = room.room_group_codes ?? []
+    const programCode = offering.program?.code ?? null
+
+    return groupCodes.includes('General') || (programCode !== null && groupCodes.includes(programCode))
+}
+
+function roomOptionsFor(offering) {
+    const currentId = offering.preferred_by_rooms?.[0]?.id
+
+    return props.rooms.filter(r => r.id === currentId || isRoomEligible(r, offering))
+}
+
+// AssignmentDropdown wants a flat { id, label } shape rather than
+// raw Faculty/Room objects — these just adapt the two filtered lists
+// above without changing the eligibility logic itself.
+//
+// Faculty additionally gets a `disabled` flag + a load-aware label:
+// assigning this offering would need `offering.units` more capacity
+// than the faculty has left (current_load vs effective_max_units,
+// both computed server-side in SubjectOfferingController::index()).
+// The faculty CURRENTLY assigned to this offering is never disabled
+// for it — their existing load already includes this offering, so
+// re-picking them doesn't add anything new. This is purely a UI
+// hint; assertWithinMaxUnits() on the server is still what actually
+// enforces the cap (see updateFaculty()'s error handling below).
+function facultyDropdownOptionsFor(offering) {
+    const currentId = offering.teaching_assignment?.faculty?.id
+    const neededUnits = offering.units ?? 0
+
+    return facultyOptionsFor(offering).map(f => {
+        const isCurrent = f.id === currentId
+        const wouldExceed = ! isCurrent && neededUnits > (f.remaining_units ?? Infinity)
+
+        return {
+            id: f.id,
+            label: wouldExceed ? `${f.full_name} — Full Load` : f.full_name,
+            disabled: wouldExceed,
+        }
+    })
+}
+
+function roomDropdownOptionsFor(offering) {
+    return roomOptionsFor(offering).map(r => ({ id: r.id, label: r.room_code }))
+}
+
+/*
+|--------------------------------------------------------------------------
+| Inline Faculty / Preferred Room
+|--------------------------------------------------------------------------
+|
+| Both dropdowns write immediately on change (no separate "Save"
+| button) and reload only the `offerings` prop afterward, same
+| pattern as applyBulkUpdate() below — filters/pagination survive.
+| Faculty is a real Teaching Assignment; Room is a preference only
+| (see SubjectOfferingController::assignFaculty()/setPreferredRoom()).
+*/
+
+const savingFacultyId = ref(null)
+const savingRoomId = ref(null)
+
+async function updateFaculty(offering, facultyId) {
+    savingFacultyId.value = offering.id
+
+    try {
+        const { data } = await axios.post(route('subject-offerings.assign-faculty', offering.id), {
+            faculty_id: facultyId || null,
+        })
+
+        flash.value = { type: 'success', message: data.message }
+        router.reload({ only: ['offerings'], preserveScroll: true, preserveState: true })
+    } catch (error) {
+        flash.value = {
+            type: 'error',
+            message: error.response?.data?.message ?? 'Failed to assign Faculty. Please try again.',
+        }
+        // Reload anyway so the dropdown snaps back to the actual saved
+        // value instead of sitting on the rejected selection.
+        router.reload({ only: ['offerings'], preserveScroll: true, preserveState: true })
+    } finally {
+        savingFacultyId.value = null
+        setTimeout(() => { flash.value = null }, 6000)
+    }
+}
+
+async function updatePreferredRoom(offering, roomId) {
+    savingRoomId.value = offering.id
+
+    try {
+        const { data } = await axios.put(route('subject-offerings.set-preferred-room', offering.id), {
+            room_id: roomId || null,
+        })
+
+        flash.value = { type: 'success', message: data.message }
+        router.reload({ only: ['offerings'], preserveScroll: true, preserveState: true })
+    } catch (error) {
+        flash.value = {
+            type: 'error',
+            message: error.response?.data?.message ?? 'Failed to set Preferred Room. Please try again.',
+        }
+        router.reload({ only: ['offerings'], preserveScroll: true, preserveState: true })
+    } finally {
+        savingRoomId.value = null
+        setTimeout(() => { flash.value = null }, 6000)
+    }
 }
 
 /*
@@ -488,18 +647,18 @@ watch(() => props.offerings.data, () => {
                                     @change="toggleSelectAllOnPage"
                                 />
                             </th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">EDP Code</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Program</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Year</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Section</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Subject</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Units</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Hours</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Classification</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Faculty</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Room</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Overall Status</th>
-                            <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]"></th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">EDP Code</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Program</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Year</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Section</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Subject</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Units</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Hours</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Classification</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Faculty</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Room</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Overall Status</th>
+                            <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]"></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -523,7 +682,7 @@ watch(() => props.offerings.data, () => {
                             <td class="px-4 py-3 text-[var(--text-primary)]">
                                 {{ offering.program?.code }}
                             </td>
-                            <td class="px-4 py-3 text-[var(--text-primary)]">
+                            <td class="px-4 py-3 text-center text-[var(--text-primary)]">
                                 {{ offering.year_level }}
                             </td>
                             <td class="px-4 py-3 text-[var(--text-primary)]">
@@ -540,32 +699,52 @@ watch(() => props.offerings.data, () => {
                                 <div class="font-medium">{{ offering.subject?.subject_code }}</div>
                                 <div class="text-xs text-[var(--text-muted)]">{{ offering.subject?.descriptive_title }}</div>
                             </td>
-                            <td class="px-4 py-3 text-[var(--text-primary)]">
+                            <td class="px-4 py-3 text-center text-[var(--text-primary)]">
                                 {{ offering.units ?? '—' }}
                             </td>
-                            <td class="px-4 py-3 text-[var(--text-primary)]">
+                            <td class="px-4 py-3 text-center text-[var(--text-primary)]">
                                 {{ offering.hours ?? '—' }}
                             </td>
-                            <td class="px-4 py-3 text-[var(--text-primary)]">
+                            <td class="px-4 py-3 text-center text-[var(--text-primary)]">
                                 {{ offering.classification ?? '—' }}
                             </td>
-                            <td class="px-4 py-3">
+                            <td class="px-4 py-3 text-center">
+                                <AssignmentDropdown
+                                    v-if="can.assignFaculty"
+                                    :model-value="offering.teaching_assignment?.faculty?.id ?? ''"
+                                    :options="facultyDropdownOptionsFor(offering)"
+                                    :disabled="savingFacultyId === offering.id"
+                                    :badge-class="assignmentBadgeClass(offering.faculty_status)"
+                                    max-width-class="max-w-[180px]"
+                                    @update:model-value="value => updateFaculty(offering, value)"
+                                />
                                 <span
+                                    v-else
                                     class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold"
                                     :class="assignmentBadgeClass(offering.faculty_status)"
                                 >
-                                    {{ offering.faculty_status }}
+                                    {{ offering.teaching_assignment?.faculty?.full_name ?? offering.faculty_status }}
                                 </span>
                             </td>
-                            <td class="px-4 py-3">
+                            <td class="px-4 py-3 text-center">
+                                <AssignmentDropdown
+                                    v-if="can.setPreferredRoom"
+                                    :model-value="offering.preferred_by_rooms?.[0]?.id ?? ''"
+                                    :options="roomDropdownOptionsFor(offering)"
+                                    :disabled="savingRoomId === offering.id"
+                                    :badge-class="assignmentBadgeClass(offering.room_status)"
+                                    max-width-class="max-w-[160px]"
+                                    @update:model-value="value => updatePreferredRoom(offering, value)"
+                                />
                                 <span
+                                    v-else
                                     class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold"
                                     :class="assignmentBadgeClass(offering.room_status)"
                                 >
-                                    {{ offering.room_status }}
+                                    {{ offering.preferred_by_rooms?.[0]?.room_code ?? offering.room_status }}
                                 </span>
                             </td>
-                            <td class="px-4 py-3">
+                            <td class="px-4 py-3 text-center">
                                 <span
                                     class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold"
                                     :class="statusBadgeClass(offering.overall_status)"
@@ -578,10 +757,11 @@ watch(() => props.offerings.data, () => {
                                 <button
                                     v-if="can.delete"
                                     @click="destroy(offering)"
-                                    class="btn-delete inline-flex items-center gap-1.5"
+                                    title="Delete"
+                                    aria-label="Delete Subject Offering"
+                                    class="btn-delete inline-flex items-center justify-center p-2"
                                 >
                                     <TrashIcon class="h-3.5 w-3.5" />
-                                    Delete
                                 </button>
                             </td>
                         </tr>

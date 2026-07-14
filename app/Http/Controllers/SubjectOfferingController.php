@@ -7,15 +7,19 @@ use App\Models\AcademicTerm;
 use App\Models\Curriculum;
 use App\Models\CurriculumItem;
 use App\Models\Department;
+use App\Models\Faculty;
 use App\Models\Program;
+use App\Models\Room;
 use App\Models\Section;
 use App\Models\Specialization;
 use App\Models\SubjectOffering;
+use App\Models\TeachingAssignment;
 use App\Models\User;
 use App\Notifications\SubjectOfferingsGenerated;
 use App\Services\EdpCodeService;
 use App\Services\SchedulingWorkspaceService;
 use App\Services\SubjectOfferingGeneratorService;
+use App\Services\TeachingAssignmentService;
 use App\Services\AuditLogService;
 use App\Services\ActivityHistoryService;
 use Illuminate\Http\Request;
@@ -24,13 +28,15 @@ use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 
 class SubjectOfferingController extends Controller implements HasMiddleware
 {
     public function __construct(
         private readonly SubjectOfferingGeneratorService $generator,
-        private readonly SchedulingWorkspaceService $workspace
+        private readonly SchedulingWorkspaceService $workspace,
+        private readonly TeachingAssignmentService $teachingAssignmentService
     ) {
     }
 
@@ -56,6 +62,55 @@ class SubjectOfferingController extends Controller implements HasMiddleware
     }
 
     /**
+     * Same rule as BlockScheduleController::managerDepartmentId() /
+     * TeachingAssignmentController::managerDepartmentId() — copied
+     * verbatim rather than shared, on purpose, so these modules can
+     * never silently drift apart from each other. Admin, Registrar,
+     * and Assistant Dean see every department (Assistant Dean is a
+     * cross-department operational role in this system, unlike
+     * Dean/OIC); a Dean or OIC only ever sees/acts on their OWN
+     * department's Subject Offerings.
+     */
+    private function managerDepartmentId($user): ?int
+    {
+        if ($user->hasAnyRole(['Admin', 'Registrar', 'Assistant Dean'])) {
+            return null;
+        }
+
+        return $user->department_id;
+    }
+
+    /**
+     * Whether $user may assign Faculty / set a Preferred Room / delete
+     * $subjectOffering. Admin/Registrar/Assistant Dean always can.
+     * Dean/OIC only for an offering whose Program belongs to their own
+     * Department — re-checked here (not just relied on via the
+     * already-scoped index() query) so a direct API call can't smuggle
+     * in another department's offering id.
+     */
+    private function canManageOffering($user, SubjectOffering $subjectOffering): bool
+    {
+        $departmentId = $this->managerDepartmentId($user);
+
+        if ($departmentId === null) {
+            return true;
+        }
+
+        $subjectOffering->loadMissing('program');
+
+        return $subjectOffering->program?->department_id === $departmentId;
+    }
+
+    private function assertManagesOffering(SubjectOffering $subjectOffering): void
+    {
+        abort_unless(
+            $this->canManageOffering(auth()->user(), $subjectOffering),
+            403,
+            'You do not have permission to manage this Subject Offering — it belongs to another department.'
+        );
+    }
+
+    /**
      * Shared filter logic used by both index() (paginated, Inertia)
      * and print() (unpaginated, Blade). Keeping this in one place
      * means the Print button always reflects exactly what's on
@@ -78,12 +133,14 @@ class SubjectOfferingController extends Controller implements HasMiddleware
         $sectionId = $request->input('section_id');
         $search = trim((string) $request->input('search', ''));
 
+        $departmentId = $this->managerDepartmentId(auth()->user());
+
         return SubjectOffering::with([
                 'section:id,section_code,is_irregular',
                 'subject:id,subject_code,descriptive_title',
-                'program:id,code',
+                'program:id,code,department_id',
                 'academicTerm:id,status,class_end_date',
-                'teachingAssignment',
+                'teachingAssignment.faculty:id,first_name,middle_name,last_name,suffix,department_id,faculty_scope',
                 // Added alongside the fix in SubjectOffering.php:
                 // overall_status/room_status now read these two
                 // relations in-memory when eager-loaded, instead of
@@ -94,9 +151,13 @@ class SubjectOfferingController extends Controller implements HasMiddleware
                 // full unpaginated fetch already required to filter on
                 // a derived value.
                 'schedule',
-                'preferredByRooms',
+                'preferredByRooms:id,room_code',
             ])
             ->when($academicTermId, fn ($q) => $q->where('academic_term_id', $academicTermId))
+            ->when($departmentId, fn ($q) => $q->whereHas(
+                'program',
+                fn ($p) => $p->where('department_id', $departmentId)
+            ))
             ->when($programId, fn ($q) => $q->where('program_id', $programId))
             ->when($specializationId, fn ($q) => $q->whereHas(
                 'curriculum',
@@ -132,6 +193,8 @@ class SubjectOfferingController extends Controller implements HasMiddleware
         $page = max(1, (int) $request->input('page', 1));
         $perPage = 20;
 
+        $departmentId = $this->managerDepartmentId(auth()->user());
+
         $query = $this->filteredOfferingsQuery($request)
             ->orderBy('year_level')
             ->orderBy('edp_code');
@@ -156,7 +219,10 @@ class SubjectOfferingController extends Controller implements HasMiddleware
 
             'academicTerms' => AcademicTerm::orderByDesc('academic_year')->orderBy('semester')->get(),
 
-            'programs' => Program::where('active', true)->orderBy('name')->get(['id', 'code', 'name']),
+            'programs' => Program::where('active', true)
+                ->when($departmentId, fn ($q) => $q->where('department_id', $departmentId))
+                ->orderBy('name')
+                ->get(['id', 'code', 'name']),
 
             'specializations' => Specialization::where('active', true)
                 ->orderBy('name')
@@ -179,6 +245,70 @@ class SubjectOfferingController extends Controller implements HasMiddleware
 
             'statuses' => SubjectOffering::STATUSES,
 
+            // Lightweight lists for the inline Faculty / Preferred Room
+            // dropdowns on this page — id + display label only, not the
+            // full Faculty/Room resource, since that's all the <select>
+            // needs. Unfiltered by department/scope: assignFaculty()
+            // below still re-validates eligibility server-side via
+            // TeachingAssignmentService, so showing every active faculty
+            // here is a UI convenience, not the actual authorization
+            // boundary.
+            //
+            // current_load/effective_max_units are ADDITIONALLY exposed
+            // (not just scope/department) purely so the dropdown can
+            // grey out and label an already-full faculty member before
+            // the user picks them — assertWithinMaxUnits() on the
+            // server remains the actual enforcement, this is only a UI
+            // hint computed the same way (sum of units across active
+            // Teaching Assignments in THIS academic term).
+            'faculties' => (function () use ($academicTermId) {
+                $currentLoads = TeachingAssignment::query()
+                    ->join('subject_offerings', 'teaching_assignments.subject_offering_id', '=', 'subject_offerings.id')
+                    ->join('subjects', 'subject_offerings.subject_id', '=', 'subjects.id')
+                    ->where('teaching_assignments.active', true)
+                    ->where('subject_offerings.academic_term_id', $academicTermId)
+                    ->groupBy('teaching_assignments.faculty_id')
+                    ->select('teaching_assignments.faculty_id', DB::raw('SUM(subjects.units) as total_units'))
+                    ->pluck('total_units', 'faculty_id');
+
+                return Faculty::where('status', true)
+                    ->with('loadOverloads')
+                    ->orderBy('last_name')
+                    ->get(['id', 'first_name', 'middle_name', 'last_name', 'suffix', 'department_id', 'faculty_scope', 'max_units'])
+                    ->map(function (Faculty $f) use ($currentLoads) {
+                        $currentLoad = (int) ($currentLoads[$f->id] ?? 0);
+                        $cap = $f->effective_max_units;
+
+                        return [
+                            'id' => $f->id,
+                            'full_name' => $f->full_name,
+                            'department_id' => $f->department_id,
+                            'faculty_scope' => $f->faculty_scope,
+                            'current_load' => $currentLoad,
+                            'effective_max_units' => $cap,
+                            'remaining_units' => max(0, $cap - $currentLoad),
+                        ];
+                    })
+                    ->values();
+            })(),
+
+            // room_group_codes (e.g. ['General'], ['BSIT'], ['BSCRIM'])
+            // is what actually governs which rooms a given offering may
+            // use — mirrors Room::scopeAvailableFor(): a room is
+            // eligible if it's General OR specifically assigned to the
+            // offering's program. Eager-load roomGroups so the
+            // room_group_codes accessor doesn't fire one query per room.
+            'rooms' => Room::with('roomGroups')
+                ->orderBy('room_code')
+                ->get(['id', 'room_code', 'room_type'])
+                ->map(fn (Room $r) => [
+                    'id' => $r->id,
+                    'room_code' => $r->room_code,
+                    'room_type' => $r->room_type,
+                    'room_group_codes' => $r->room_group_codes,
+                ])
+                ->values(),
+
             'filters' => [
                 'academic_term_id' => $academicTermId ? (int) $academicTermId : null,
                 'program_id' => $programId ? (int) $programId : null,
@@ -190,13 +320,19 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             ],
 
             'can' => [
-                'delete' => auth()->user()->hasAnyRole(['Admin', 'Registrar']),
-                // Dean/Assistant Dean/OIC can see Weekly Hours (it's
-                // already in the Hours column below) but never select
-                // rows or open the Bulk Update modal — same tier as
-                // `delete` above, not the broader "can view this page
-                // at all" tier the route middleware already enforces.
-                'bulkUpdateWeeklyHours' => auth()->user()->hasAnyRole(['Admin', 'Registrar']),
+                // All five roles can now perform every action below —
+                // Admin/Registrar/Assistant Dean act on every
+                // department; a Dean/OIC only ever sees their own
+                // department's offerings in the first place (see the
+                // whereHas('program', ...) scope in
+                // filteredOfferingsQuery() above), and every mutating
+                // action (destroy/assignFaculty/setPreferredRoom/
+                // bulkUpdateWeeklyHours) re-checks canManageOffering()
+                // server-side regardless of what this flag says.
+                'delete' => auth()->user()->hasAnyRole(['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC']),
+                'bulkUpdateWeeklyHours' => auth()->user()->hasAnyRole(['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC']),
+                'assignFaculty' => auth()->user()->hasAnyRole(['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC']),
+                'setPreferredRoom' => auth()->user()->hasAnyRole(['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC']),
             ],
 
         ]);
@@ -582,10 +718,12 @@ class SubjectOfferingController extends Controller implements HasMiddleware
     public function destroy(SubjectOffering $subjectOffering)
     {
         abort_unless(
-            auth()->user()->hasAnyRole(['Admin', 'Registrar']),
+            auth()->user()->hasAnyRole(['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC']),
             403,
             'You do not have permission to delete Subject Offerings.'
         );
+
+        $this->assertManagesOffering($subjectOffering);
 
         $this->workspace->assertWritable($subjectOffering->academicTerm);
 
@@ -626,9 +764,9 @@ class SubjectOfferingController extends Controller implements HasMiddleware
     public function bulkUpdateWeeklyHours(BulkUpdateWeeklyHoursRequest $request): JsonResponse
     {
         abort_unless(
-            auth()->user()->hasAnyRole(['Admin', 'Registrar']),
+            auth()->user()->hasAnyRole(['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC']),
             403,
-            'Only Admin and Registrar can perform Bulk Update Weekly Hours.'
+            'Only Admin, Registrar, Dean, Assistant Dean, and OIC can perform Bulk Update Weekly Hours.'
         );
 
         $validated = $request->validated();
@@ -637,12 +775,19 @@ class SubjectOfferingController extends Controller implements HasMiddleware
                 'academicTerm',
                 'subject:id,subject_code,descriptive_title',
                 'section:id,section_code',
-                'program:id,code',
+                'program:id,code,department_id',
             ])
             ->whereIn('id', $validated['subject_offering_ids'])
             ->get();
 
         abort_if($offerings->isEmpty(), 404, 'No matching Subject Offerings were found.');
+
+        // A scoped Dean/OIC's selection can never span outside their
+        // own department — the Index page's query already keeps other
+        // departments' rows off their screen entirely, so reaching
+        // this would mean a stale selection or a direct API call, not
+        // a normal click-through.
+        $offerings->each(fn (SubjectOffering $offering) => $this->assertManagesOffering($offering));
 
         // A mixed selection spanning more than one Academic Term must
         // never partially apply — assertWritable() throws on the
@@ -722,6 +867,184 @@ class SubjectOfferingController extends Controller implements HasMiddleware
         return response()->json([
             'message' => "{$offerings->count()} Subject Offering(s) updated to {$newHours} weekly hours.",
             'updated_count' => $offerings->count(),
+        ]);
+    }
+
+    /**
+     * Inline Faculty assignment from the Subject Offerings table —
+     * same underlying record (teaching_assignments) and same business
+     * rules as the Faculty Loading page's "Assign Subject" modal
+     * (TeachingAssignmentService::assertBusinessRules), just reachable
+     * without leaving this page. Unlike TeachingAssignmentController::
+     * store(), this ALSO handles reassignment: if the offering already
+     * has a Teaching Assignment, the old one is deleted first so
+     * picking a different faculty from the dropdown doesn't 422 on the
+     * subject_offering_id unique constraint. Passing a null faculty_id
+     * clears the assignment entirely (same effect as the Faculty
+     * Loading page's "Remove" action).
+     *
+     * JSON endpoint, same convention as bulkUpdateWeeklyHours() above
+     * — the page reloads just the `offerings` prop afterward so
+     * filters/pagination survive.
+     */
+    public function assignFaculty(Request $request, SubjectOffering $subjectOffering): JsonResponse
+    {
+        abort_unless(
+            auth()->user()->hasAnyRole(['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC']),
+            403,
+            'Only Admin, Registrar, Dean, Assistant Dean, and OIC can assign Faculty here.'
+        );
+
+        $this->assertManagesOffering($subjectOffering);
+
+        $validated = $request->validate([
+            'faculty_id' => ['nullable', 'exists:faculties,id'],
+        ]);
+
+        $this->workspace->assertWritable($subjectOffering->academicTerm);
+
+        $subjectOffering->loadMissing('section');
+
+        $existing = $subjectOffering->teachingAssignment;
+
+        // Clearing — same effect as the destroy() action on the
+        // Faculty Loading page, just triggered from here instead.
+        if (! $validated['faculty_id']) {
+            if ($existing) {
+                $faculty = $existing->faculty;
+                $existing->delete();
+
+                AuditLogService::log(
+                    action: 'unassigned',
+                    module: 'Faculty Loading',
+                    model: $faculty,
+                    description: $faculty
+                        ? "Removed {$faculty->full_name} from {$subjectOffering->section?->section_code} {$subjectOffering->edp_code}"
+                        : 'Removed a faculty load assignment',
+                    oldValues: ['faculty' => $faculty?->full_name, 'subject_offering' => $subjectOffering->edp_code],
+                    recordName: "{$subjectOffering->section?->section_code} {$subjectOffering->edp_code}",
+                );
+            }
+
+            return response()->json(['message' => "Faculty cleared for {$subjectOffering->edp_code}."]);
+        }
+
+        $payload = [
+            'subject_offering_id' => $subjectOffering->id,
+            'faculty_id' => $validated['faculty_id'],
+        ];
+
+        // assertBusinessRules() re-checks scope/department/active-term/
+        // max-units exactly like the Faculty Loading modal does — the
+        // dropdown here shows every active faculty (see index() above)
+        // precisely because this check, not the dropdown's contents,
+        // is the real authorization boundary.
+        try {
+            $this->teachingAssignmentService->assertBusinessRules($payload, $existing);
+        } catch (ValidationException $e) {
+            return response()->json(['message' => collect($e->errors())->flatten()->first()], 422);
+        }
+
+        // Delete any existing assignment first — teaching_assignments
+        // has a unique constraint on subject_offering_id, so a plain
+        // create() here would 422 on reassignment instead of swapping
+        // the faculty.
+        $existing?->delete();
+
+        TeachingAssignment::create($payload);
+
+        $faculty = Faculty::find($validated['faculty_id']);
+
+        AuditLogService::log(
+            action: 'assigned',
+            module: 'Faculty Loading',
+            model: $faculty,
+            description: "Assigned {$faculty?->full_name} to {$subjectOffering->section?->section_code} {$subjectOffering->edp_code}",
+            newValues: [
+                'faculty' => $faculty?->full_name,
+                'subject_offering' => $subjectOffering->edp_code,
+                'section' => $subjectOffering->section?->section_code,
+            ],
+            recordName: "{$subjectOffering->section?->section_code} {$subjectOffering->edp_code}",
+        );
+
+        return response()->json(['message' => "{$faculty?->full_name} assigned to {$subjectOffering->edp_code}."]);
+    }
+
+    /**
+     * Inline Preferred Room from the Subject Offerings table — writes
+     * to the same room_subject_offering pivot as the Rooms "Manage
+     * Subjects" page (Room::syncPreferredSubjects()), just from the
+     * other direction: one Offering picking its one preferred Room,
+     * instead of one Room picking many Offerings. This is deliberately
+     * a PREFERENCE, not a real Room assignment — the actual day/time/
+     * room commitment only ever happens in Master Grid, where the
+     * Greedy Scheduler checks real conflicts. Passing a null room_id
+     * clears the preference.
+     */
+    public function setPreferredRoom(Request $request, SubjectOffering $subjectOffering): JsonResponse
+    {
+        abort_unless(
+            auth()->user()->hasAnyRole(['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC']),
+            403,
+            'Only Admin, Registrar, Dean, Assistant Dean, and OIC can set a Preferred Room here.'
+        );
+
+        $this->assertManagesOffering($subjectOffering);
+
+        $validated = $request->validate([
+            'room_id' => ['nullable', 'exists:rooms,id'],
+        ]);
+
+        $this->workspace->assertWritable($subjectOffering->academicTerm);
+
+        // Same compatibility rule as Room::manageSubjects() /
+        // syncPreferredSubjects() — a Lecture offering can only prefer
+        // a Lecture room, a Laboratory offering only a Laboratory room.
+        // Re-checked here (not just filtered out of the dropdown) so a
+        // direct API call can't smuggle in a mismatched room.
+        //
+        // NOTE: unlike syncPreferredSubjects(), this does NOT run
+        // RoomCapacityService's weekly-hours capacity check — that
+        // service evaluates a room's FULL preferred set at once, which
+        // doesn't fit a single-offering inline update. If capacity
+        // needs to be enforced here too, wire in RoomCapacityService
+        // the same way Room::syncPreferredSubjects() does.
+        if ($validated['room_id']) {
+            $room = Room::findOrFail($validated['room_id']);
+
+            if ($room->room_type !== $subjectOffering->room_type) {
+                return response()->json([
+                    'message' => "{$room->room_code} is a {$room->room_type} room — {$subjectOffering->edp_code} requires {$subjectOffering->room_type}.",
+                ], 422);
+            }
+        }
+
+        // sync() with a single ID (or an empty array to clear) — an
+        // Offering has at most one preferred Room, same "single
+        // preference" shape getPreferredRoomAttribute() already
+        // assumes when it reads ->first() off this same pivot.
+        $subjectOffering->preferredByRooms()->sync(
+            $validated['room_id'] ? [$validated['room_id']] : []
+        );
+
+        $room = $validated['room_id'] ? Room::find($validated['room_id']) : null;
+
+        AuditLogService::log(
+            action: 'updated',
+            module: 'Subject Offering',
+            model: $subjectOffering,
+            description: $room
+                ? "Set Preferred Room {$room->room_code} for {$subjectOffering->edp_code}"
+                : "Cleared Preferred Room for {$subjectOffering->edp_code}",
+            newValues: ['preferred_room' => $room?->room_code],
+            recordName: $subjectOffering->edp_code,
+        );
+
+        return response()->json([
+            'message' => $room
+                ? "Preferred Room set to {$room->room_code} for {$subjectOffering->edp_code}."
+                : "Preferred Room cleared for {$subjectOffering->edp_code}.",
         ]);
     }
 }

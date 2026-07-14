@@ -426,6 +426,28 @@ Route::middleware(['auth'])->group(function () {
 
         /*
         |--------------------------------------------------------------------------
+        | Subject Offerings — Inline Faculty / Preferred Room
+        |--------------------------------------------------------------------------
+        |
+        | Lets Admin/Registrar assign Faculty (a real Teaching
+        | Assignment, same record as the Faculty Loading page) and set
+        | a Preferred Room (the same room_subject_offering pivot the
+        | Rooms "Manage Subjects" page writes to) directly from the
+        | Subject Offerings table, without navigating away. Sits in
+        | this route group (view-only tier) so Dean/Assistant Dean/OIC
+        | never 403 just loading this page, but each method's own
+        | abort_unless() keeps the actual write scoped to Admin/
+        | Registrar, matching destroy()/bulkUpdateWeeklyHours() above.
+        */
+
+        Route::post('subject-offerings/{subjectOffering}/faculty', [SubjectOfferingController::class, 'assignFaculty'])
+            ->name('subject-offerings.assign-faculty');
+
+        Route::put('subject-offerings/{subjectOffering}/preferred-room', [SubjectOfferingController::class, 'setPreferredRoom'])
+            ->name('subject-offerings.set-preferred-room');
+
+        /*
+        |--------------------------------------------------------------------------
         | Faculty Loading (Teaching Assignments)
         |--------------------------------------------------------------------------
         |
