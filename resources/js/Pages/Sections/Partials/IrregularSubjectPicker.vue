@@ -18,9 +18,16 @@ const errorMessage = ref(null)
 const academicTermLabel = ref(null)
 const availableSubjects = ref([])
 const attachedOfferings = ref([])
+const fulfilledOfferings = ref([])
 
 const search = ref('')
 const selected = ref(new Set())
+// Curriculum Item IDs the user explicitly wants a NEW/additional EDP
+// Code for, even though an existing Regular Section already covers
+// that Subject — the "department opens an additional Open/Irregular
+// Section anyway" case. Only meaningful for items that have an
+// existing_offering; ignored otherwise.
+const forceNew = ref(new Set())
 const submitting = ref(false)
 const submitError = ref(null)
 
@@ -34,6 +41,7 @@ async function loadSubjects() {
         academicTermLabel.value = data.academic_term
         availableSubjects.value = data.subjects ?? []
         attachedOfferings.value = data.attached ?? []
+        fulfilledOfferings.value = data.fulfilled ?? []
         errorMessage.value = data.error ?? null
     } catch (e) {
         errorMessage.value = e?.response?.data?.message ?? 'Unable to load subjects right now.'
@@ -88,12 +96,27 @@ const groupedSubjects = computed(() => {
 function toggle(curriculumItemId) {
     if (selected.value.has(curriculumItemId)) {
         selected.value.delete(curriculumItemId)
+        // A force-new choice only makes sense while the subject is
+        // selected — clear it so it doesn't linger and silently apply
+        // if the same subject gets re-selected later.
+        forceNew.value.delete(curriculumItemId)
     } else {
         selected.value.add(curriculumItemId)
     }
 
     // Force reactivity — Set mutations aren't tracked in-place by Vue.
     selected.value = new Set(selected.value)
+    forceNew.value = new Set(forceNew.value)
+}
+
+function toggleForceNew(curriculumItemId) {
+    if (forceNew.value.has(curriculumItemId)) {
+        forceNew.value.delete(curriculumItemId)
+    } else {
+        forceNew.value.add(curriculumItemId)
+    }
+
+    forceNew.value = new Set(forceNew.value)
 }
 
 const selectedCount = computed(() => selected.value.size)
@@ -112,11 +135,15 @@ function attachSelected() {
 
     router.post(
         route('sections.irregular-subjects.store', props.section.id),
-        { curriculum_item_ids: Array.from(selected.value) },
+        {
+            curriculum_item_ids: Array.from(selected.value),
+            force_new_curriculum_item_ids: Array.from(forceNew.value),
+        },
         {
             preserveScroll: true,
             onSuccess: () => {
                 selected.value = new Set()
+                forceNew.value = new Set()
                 loadSubjects()
             },
             onError: (errors) => {
@@ -171,6 +198,25 @@ function attachSelected() {
                 >
                     <span class="font-mono text-[#D4A62A]">{{ offering.edp_code }}</span>
                     <span>{{ offering.subject_code }} — {{ offering.descriptive_title }}</span>
+                </span>
+            </div>
+        </div>
+
+        <!-- Subjects fulfilled by reusing an existing Regular Section's
+             EDP Code — no Subject Offering of this Section's own. -->
+        <div v-if="fulfilledOfferings.length" class="mb-5">
+            <p class="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)] mb-2">
+                Covered by Existing Regular Sections ({{ fulfilledOfferings.length }})
+            </p>
+            <div class="flex flex-wrap gap-2">
+                <span
+                    v-for="offering in fulfilledOfferings"
+                    :key="offering.id"
+                    class="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-[var(--text-secondary)]"
+                >
+                    <span class="font-mono text-emerald-600 dark:text-emerald-400">{{ offering.edp_code }}</span>
+                    <span>{{ offering.subject_code }} — {{ offering.descriptive_title }}</span>
+                    <span class="text-[var(--text-muted)]">via {{ offering.fulfilled_by_section }}</span>
                 </span>
             </div>
         </div>
@@ -231,6 +277,54 @@ function attachSelected() {
                                 <p class="text-xs text-[var(--text-muted)] truncate">
                                     {{ yearLabel(subject.year_level) }}
                                     <span v-if="subject.units">· {{ subject.units }} unit{{ subject.units === 1 ? '' : 's' }}</span>
+                                </p>
+
+                                <!-- Reuse info: if a Regular Section already offers this
+                                     Subject, attaching it here will reuse that EDP Code
+                                     instead of generating a new one, unless "force new"
+                                     is toggled on. Always clickable (not gated behind
+                                     selecting the Subject first) — it's harmless to set
+                                     before selecting, and gating it caused people to
+                                     think the control was broken. It only actually
+                                     matters if the Subject ends up selected & attached. -->
+                                <div v-if="subject.existing_offering" class="mt-2 flex items-center gap-2 flex-wrap">
+                                    <span class="inline-flex items-center gap-1 rounded bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
+                                        Will reuse <span class="font-mono">{{ subject.existing_offering.edp_code }}</span>
+                                        ({{ subject.existing_offering.section_code }})
+                                    </span>
+
+                                    <button
+                                        type="button"
+                                        :title="'Open a brand-new/additional class for ' + subject.subject_code + ' instead of placing this Section\'s students into ' + subject.existing_offering.section_code + ' — use this when the irregular students need a different time slot, faculty, or room than the existing class.'"
+                                        @click.stop.prevent="toggleForceNew(subject.curriculum_item_id)"
+                                        class="inline-flex items-center gap-1.5 rounded-full border-2 px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer"
+                                        :class="forceNew.has(subject.curriculum_item_id)
+                                            ? 'border-amber-500 bg-amber-500/20 text-amber-700 dark:text-amber-300'
+                                            : 'border-[var(--text-muted)]/40 text-[var(--text-secondary)] hover:border-amber-500 hover:bg-amber-500/10'"
+                                    >
+                                        <span
+                                            class="flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 transition-colors"
+                                            :class="forceNew.has(subject.curriculum_item_id)
+                                                ? 'border-amber-500 bg-amber-500'
+                                                : 'border-current'"
+                                        >
+                                            <svg
+                                                v-if="forceNew.has(subject.curriculum_item_id)"
+                                                viewBox="0 0 20 20"
+                                                fill="white"
+                                                class="h-2.5 w-2.5"
+                                            >
+                                                <path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 111.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clip-rule="evenodd" />
+                                            </svg>
+                                        </span>
+                                        Open new/additional section instead
+                                    </button>
+                                </div>
+                                <p v-if="subject.existing_offering && forceNew.has(subject.curriculum_item_id)" class="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
+                                    A separate EDP Code will be generated and scheduled independently — its own faculty, room, and time slot, distinct from {{ subject.existing_offering.section_code }}.
+                                </p>
+                                <p v-else-if="!subject.existing_offering" class="mt-1.5 text-[10px] text-[var(--text-muted)]">
+                                    No Regular Section offers this yet — a new EDP Code will be generated.
                                 </p>
                             </div>
                         </label>

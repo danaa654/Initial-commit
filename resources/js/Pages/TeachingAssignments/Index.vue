@@ -7,8 +7,9 @@ import CircularLoadIndicator from './Partials/CircularLoadIndicator.vue';
 import OverloadRequestModal from './Partials/OverloadRequestModal.vue';
 import PendingOverloadsPanel from './Partials/PendingOverloadsPanel.vue';
 import FacultyFormModal from './Partials/FacultyFormModal.vue';
+import FacultyListModal from './Partials/FacultyListModal.vue';
 import FacultyDeleteModal from '../Faculty/FacultyDeleteModal.vue';
-import { UserGroupIcon, PlusIcon, PencilIcon, TrashIcon } from '@heroicons/vue/24/outline';
+import { UserGroupIcon, PlusIcon, PencilIcon, TrashIcon, Bars3BottomLeftIcon } from '@heroicons/vue/24/outline';
 
 const props = defineProps({
     planningTerm: { type: Object, default: null },
@@ -56,6 +57,24 @@ const employmentFilter = ref('');
 | left never navigates away.
 |--------------------------------------------------------------------------
 */
+
+const showFacultyListModal = ref(false);
+
+function openFacultyList() {
+    showFacultyListModal.value = true;
+}
+
+function closeFacultyList() {
+    showFacultyListModal.value = false;
+}
+
+// Selecting a faculty member from the list modal should behave just
+// like clicking them in the roster — open their detail panel — and
+// close the list so it doesn't sit on top of it.
+function selectFacultyFromList(faculty) {
+    closeFacultyList();
+    selectFaculty(faculty);
+}
 
 const showFacultyFormModal = ref(false);
 const facultyBeingEdited = ref(null); // null => Add mode, object => Edit mode
@@ -787,15 +806,25 @@ function handleUnassign(offering) {
                             </div>
                         </div>
 
-                        <button
-                            v-if="canManageFaculty"
-                            type="button"
-                            class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[#D4A62A] text-white transition hover:bg-[#c29722]"
-                            title="Add Faculty"
-                            @click="openAddFaculty"
-                        >
-                            <PlusIcon class="h-4.5 w-4.5" />
-                        </button>
+                        <div class="flex flex-shrink-0 items-center gap-1.5">
+                            <button
+                                type="button"
+                                class="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--card-border)] text-[var(--text-secondary)] transition hover:border-[#D4A62A]/50 hover:bg-[#D4A62A]/10 hover:text-[#D4A62A]"
+                                title="View Faculty List"
+                                @click="openFacultyList"
+                            >
+                                <Bars3BottomLeftIcon class="h-4.5 w-4.5" />
+                            </button>
+                            <button
+                                v-if="canManageFaculty"
+                                type="button"
+                                class="flex h-8 w-8 items-center justify-center rounded-lg bg-[#D4A62A] text-white transition hover:bg-[#c29722]"
+                                title="Add Faculty"
+                                @click="openAddFaculty"
+                            >
+                                <PlusIcon class="h-4.5 w-4.5" />
+                            </button>
+                        </div>
                     </div>
 
                     <input
@@ -1469,6 +1498,22 @@ function handleUnassign(offering) {
             :faculty="selectedFaculty"
             :is-unscoped="isAdminOrRegistrar"
             @close="closeOverloadModal"
+        />
+
+        <!-- ==================== FACULTY LIST MODAL ==================== -->
+        <FacultyListModal
+            :show="showFacultyListModal"
+            :faculties="faculties"
+            :departments="departments"
+            :scope-labels="scopeLabels"
+            :can-manage-faculty="canManageFaculty"
+            :total-load="totalLoad"
+            :effective-max-units="effectiveMaxUnits"
+            @close="closeFacultyList"
+            @add="openAddFaculty"
+            @edit="openEditFaculty"
+            @delete="openDeleteFaculty"
+            @select="selectFacultyFromList"
         />
 
         <!-- ==================== ADD / EDIT FACULTY MODAL ==================== -->

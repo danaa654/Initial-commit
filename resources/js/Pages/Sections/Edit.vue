@@ -190,7 +190,7 @@ function submit() {
 
             <div
                 class="mx-auto transition-[max-width] duration-200"
-                :class="section.is_irregular ? 'max-w-6xl' : 'max-w-2xl'"
+                :class="form.is_irregular ? 'max-w-6xl' : 'max-w-2xl'"
             >
 
                 <!-- Header -->
@@ -203,15 +203,18 @@ function submit() {
                             Edit Section
                         </h1>
                         <p class="text-sm text-[var(--text-muted)]">
-                            {{ section.section_code }}
+                            {{ generatedCode ?? section.section_code }}
                         </p>
                     </div>
                 </div>
 
                 <!-- Form card sits alone (max-w-2xl) for Regular Sections;
                      once Irregular, it shares a 2-column row with the
-                     Subject picker instead of stacking above it. -->
-                <div :class="section.is_irregular ? 'grid grid-cols-1 lg:grid-cols-2 gap-6 items-start' : ''">
+                     Subject picker instead of stacking above it. Follows
+                     the live toggle (form.is_irregular), not just the
+                     saved value, so flipping it reshapes the page
+                     immediately instead of only after a save+reload. -->
+                <div :class="form.is_irregular ? 'grid grid-cols-1 lg:grid-cols-2 gap-6 items-start' : ''">
 
                 <div class="relative overflow-hidden bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl shadow-lg p-6 transition-colors duration-300">
 
@@ -481,19 +484,40 @@ function submit() {
 
             </div>
 
-            <!-- Manually-picked Subjects — only relevant once the Section
-                 itself has been saved as Irregular; a not-yet-saved toggle
-                 flip in the form above doesn't unlock this until Update
-                 Section is submitted and the page reloads with the fresh
-                 section.is_irregular value. Sits beside the form as the
-                 grid's second column (see wrapper above), not stacked
-                 below it. -->
-            <IrregularSubjectPicker
-                v-if="section.is_irregular"
-                :section="section"
-                id="manually-assigned-subjects"
-                class="lg:sticky lg:top-6"
-            />
+            <!-- Manually-picked Subjects — shown/hidden live as the
+                 Irregular Section toggle is flipped (form.is_irregular),
+                 not gated on the saved section.is_irregular. The picker
+                 itself, though, still can't actually load data until the
+                 flip has been saved: its API 422s on a Section that
+                 isn't really Irregular yet in the DB
+                 (SubjectOfferingController::irregularSubjects()). So a
+                 toggle-on that hasn't been saved yet shows a short
+                 placeholder asking for a save first, instead of firing
+                 that request early. Sits beside the form as the grid's
+                 second column (see wrapper above), not stacked below
+                 it. -->
+            <div v-if="form.is_irregular" class="lg:sticky lg:top-6">
+
+                <IrregularSubjectPicker
+                    v-if="section.is_irregular"
+                    :section="section"
+                    id="manually-assigned-subjects"
+                />
+
+                <div
+                    v-else
+                    class="relative overflow-hidden bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl shadow-lg p-6 text-center"
+                >
+                    <div class="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-[#D4A62A] to-transparent"></div>
+                    <p class="text-sm font-medium text-[var(--text-primary)] mb-1">
+                        Save to unlock the Subject picker
+                    </p>
+                    <p class="text-xs text-[var(--text-muted)]">
+                        Click "Update Section" first — once this Section is actually saved as Irregular, you'll be able to hand-pick its Subjects here.
+                    </p>
+                </div>
+
+            </div>
 
             </div>
 

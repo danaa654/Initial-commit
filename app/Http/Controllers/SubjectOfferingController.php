@@ -8,6 +8,7 @@ use App\Models\Curriculum;
 use App\Models\CurriculumItem;
 use App\Models\Department;
 use App\Models\Faculty;
+use App\Models\IrregularSubjectFulfillment;
 use App\Models\Program;
 use App\Models\Room;
 use App\Models\Section;
@@ -501,6 +502,46 @@ class SubjectOfferingController extends Controller implements HasMiddleware
     }
 
     /**
+     * For a set of Subject IDs, find any Subject Offering already
+     * generated for a REGULAR Section (is_irregular = false) in the
+     * given Academic Term — one per Subject ID at most, so an
+     * Irregular Section's need for that Subject can be fulfilled by
+     * re-using that Regular Section's existing EDP Code instead of
+     * minting a new one (see storeIrregular() below).
+     *
+     * Not scoped to the Irregular Section's own Program/Specialization
+     * track — a retaken Subject is the same real class regardless of
+     * which Program's curriculum originally listed it (this mirrors
+     * the capstone's own example: a 4th Year BSIT student retaking a
+     * 3rd Year BSIT Subject reuses that Regular Section's EDP Code
+     * without any Program mismatch to worry about; the Subject ID
+     * itself is the shared identity).
+     *
+     * Returns a [subject_id => SubjectOffering] map. When a Subject
+     * happens to be offered by more than one Regular Section this
+     * Term, the lowest Section ID wins — arbitrary but stable, so the
+     * picker and storeIrregular() never disagree with each other.
+     *
+     * @param  array<int>  $subjectIds
+     * @return array<int, SubjectOffering>
+     */
+    private function existingRegularOfferingsFor(array $subjectIds, AcademicTerm $academicTerm): array
+    {
+        if (empty($subjectIds)) {
+            return [];
+        }
+
+        return SubjectOffering::where('academic_term_id', $academicTerm->id)
+            ->whereIn('subject_id', $subjectIds)
+            ->whereHas('section', fn ($query) => $query->where('is_irregular', false))
+            ->with('section:id,section_code')
+            ->orderBy('section_id')
+            ->get()
+            ->keyBy('subject_id')
+            ->all();
+    }
+
+    /**
      * Subjects available to hand-pick for an Irregular Section — every
      * active Subject-type Curriculum Item, across every active
      * Curriculum that matches the Section's own Program AND
@@ -539,9 +580,21 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             ]);
         }
 
-        $alreadyOfferedSubjectIds = SubjectOffering::where('academic_term_id', $academicTerm->id)
+        $ownOfferings = SubjectOffering::where('academic_term_id', $academicTerm->id)
             ->where('section_id', $section->id)
             ->pluck('subject_id');
+
+        // Subjects whose need has already been fulfilled by an
+        // existing Regular Section's Subject Offering (see
+        // storeIrregular()) — these also shouldn't be re-offered in
+        // the picker below.
+        $fulfillments = IrregularSubjectFulfillment::where('section_id', $section->id)
+            ->with(['subjectOffering.subject', 'subjectOffering.section'])
+            ->get();
+
+        $alreadyOfferedSubjectIds = $ownOfferings
+            ->merge($fulfillments->pluck('subjectOffering.subject_id'))
+            ->unique();
 
         $attached = SubjectOffering::where('academic_term_id', $academicTerm->id)
             ->where('section_id', $section->id)
@@ -557,6 +610,20 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             ])
             ->values();
 
+        // Subjects covered via reuse rather than a Subject Offering of
+        // this Section's own — same shape as $attached, plus which
+        // Regular Section's EDP Code is actually being shared.
+        $fulfilled = $fulfillments
+            ->map(fn (IrregularSubjectFulfillment $fulfillment) => [
+                'id' => $fulfillment->id,
+                'edp_code' => $fulfillment->subjectOffering?->edp_code,
+                'subject_code' => $fulfillment->subjectOffering?->subject?->subject_code,
+                'descriptive_title' => $fulfillment->subjectOffering?->subject?->descriptive_title,
+                'year_level' => $fulfillment->subjectOffering?->year_level,
+                'fulfilled_by_section' => $fulfillment->subjectOffering?->section?->section_code,
+            ])
+            ->values();
+
         $items = CurriculumItem::query()
             ->subjects()
             ->where('active', true)
@@ -567,16 +634,35 @@ class SubjectOfferingController extends Controller implements HasMiddleware
                 $query->where('active', true);
             })
             ->with(['subject', 'curriculum.specialization'])
-            ->get()
-            ->map(fn ($item) => [
-                'curriculum_item_id' => $item->id,
-                'subject_id' => $item->subject_id,
-                'subject_code' => $item->subject?->subject_code,
-                'descriptive_title' => $item->subject?->descriptive_title,
-                'units' => $item->subject?->units,
-                'year_level' => $item->year_level,
-                'curriculum' => $item->curriculum?->display_name,
-            ])
+            ->get();
+
+        $existingRegularOfferings = $this->existingRegularOfferingsFor(
+            $items->pluck('subject_id')->unique()->all(),
+            $academicTerm
+        );
+
+        $items = $items
+            ->map(function ($item) use ($existingRegularOfferings) {
+                $existing = $existingRegularOfferings[$item->subject_id] ?? null;
+
+                return [
+                    'curriculum_item_id' => $item->id,
+                    'subject_id' => $item->subject_id,
+                    'subject_code' => $item->subject?->subject_code,
+                    'descriptive_title' => $item->subject?->descriptive_title,
+                    'units' => $item->subject?->units,
+                    'year_level' => $item->year_level,
+                    'curriculum' => $item->curriculum?->display_name,
+                    // When set, submitting this Curriculum Item will
+                    // (by default) NOT mint a new EDP Code — it will
+                    // reuse this existing Regular Section's Subject
+                    // Offering instead. See storeIrregular().
+                    'existing_offering' => $existing ? [
+                        'edp_code' => $existing->edp_code,
+                        'section_code' => $existing->section?->section_code,
+                    ] : null,
+                ];
+            })
             ->sortBy(['subject_code', 'year_level'])
             ->values();
 
@@ -584,19 +670,34 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             'academic_term' => $academicTerm->display_name,
             'subjects' => $items,
             'attached' => $attached,
+            'fulfilled' => $fulfilled,
         ]);
     }
 
     /**
-     * Attach a hand-picked set of Subjects to an Irregular Section —
-     * one Subject Offering per Curriculum Item, each one generated
-     * through EdpCodeService::generate() exactly like the batch flow
-     * generates its own (see SubjectOfferingGeneratorService), so
-     * Irregular and Regular Sections share the exact same EDP Code
-     * format and uniqueness guarantees. Additive only, same as
-     * SubjectOfferingGeneratorService::generate(): re-submitting a
-     * Curriculum Item that's already been offered to this Section in
-     * this Term is silently skipped rather than duplicated.
+     * Attach a hand-picked set of Subjects to an Irregular Section.
+     *
+     * For each picked Curriculum Item, one of two things happens:
+     *
+     *   - A Regular Section already has a Subject Offering for that
+     *     same Subject this Term, and the caller did NOT force a new
+     *     one -> no new Subject Offering/EDP Code is created. Instead
+     *     an IrregularSubjectFulfillment row records that this
+     *     Irregular Section's need is covered by that existing
+     *     Regular Section's EDP Code (see existingRegularOfferingsFor()
+     *     and the migration's docblock for why a second row can't
+     *     just share the same edp_code string).
+     *
+     *   - No Regular Section covers it yet, OR the caller explicitly
+     *     asked to open an additional/open Section for it anyway
+     *     (force_new_curriculum_item_ids) -> a new Subject Offering is
+     *     generated through EdpCodeService::generate(), exactly as
+     *     before.
+     *
+     * Additive only, same as SubjectOfferingGeneratorService::generate():
+     * re-submitting a Curriculum Item that's already been offered OR
+     * already fulfilled for this Section in this Term is silently
+     * skipped rather than duplicated.
      */
     public function storeIrregular(Request $request, Section $section)
     {
@@ -606,7 +707,16 @@ class SubjectOfferingController extends Controller implements HasMiddleware
         $validated = $request->validate([
             'curriculum_item_ids' => ['required', 'array', 'min:1'],
             'curriculum_item_ids.*' => ['integer', 'exists:curriculum_items,id'],
+            // Subset of curriculum_item_ids the caller wants to open a
+            // brand-new/additional Section for, bypassing reuse even
+            // when a Regular Section already covers that Subject —
+            // the "department explicitly requests an Open/Irregular
+            // Section" branch of the workflow.
+            'force_new_curriculum_item_ids' => ['sometimes', 'array'],
+            'force_new_curriculum_item_ids.*' => ['integer'],
         ]);
+
+        $forceNewIds = collect($validated['force_new_curriculum_item_ids'] ?? [])->flip();
 
         $section->loadMissing('curriculum.program', 'curriculum.specialization');
 
@@ -630,11 +740,29 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             ->with(['subject', 'curriculum.program', 'curriculum.specialization'])
             ->get();
 
+        $existingRegularOfferings = $this->existingRegularOfferingsFor(
+            $items->pluck('subject_id')->unique()->all(),
+            $academicTerm
+        );
+
         $created = 0;
+        $reused = 0;
         $skippedExisting = 0;
         $createdCodes = [];
+        $reusedCodes = [];
 
-        DB::transaction(function () use ($items, $section, $academicTerm, &$created, &$skippedExisting, &$createdCodes) {
+        DB::transaction(function () use (
+            $items,
+            $section,
+            $academicTerm,
+            $existingRegularOfferings,
+            $forceNewIds,
+            &$created,
+            &$reused,
+            &$skippedExisting,
+            &$createdCodes,
+            &$reusedCodes
+        ) {
             foreach ($items as $item) {
 
                 if (! $item->subject) {
@@ -646,8 +774,29 @@ class SubjectOfferingController extends Controller implements HasMiddleware
                     ->where('subject_id', $item->subject_id)
                     ->exists();
 
-                if ($alreadyOffered) {
+                $alreadyFulfilled = IrregularSubjectFulfillment::where('section_id', $section->id)
+                    ->whereHas('subjectOffering', fn ($q) => $q->where('subject_id', $item->subject_id))
+                    ->exists();
+
+                if ($alreadyOffered || $alreadyFulfilled) {
                     $skippedExisting++;
+                    continue;
+                }
+
+                $existingOffering = $existingRegularOfferings[$item->subject_id] ?? null;
+                $forceNew = $forceNewIds->has($item->id);
+
+                if ($existingOffering && ! $forceNew) {
+                    IrregularSubjectFulfillment::create([
+                        'section_id' => $section->id,
+                        'subject_offering_id' => $existingOffering->id,
+                        'curriculum_item_id' => $item->id,
+                        'created_by' => auth()->id(),
+                    ]);
+
+                    $reused++;
+                    $reusedCodes[] = $existingOffering->edp_code;
+
                     continue;
                 }
 
@@ -683,13 +832,23 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             }
         });
 
-        if ($created === 0) {
+        if ($created === 0 && $reused === 0) {
             return redirect()
                 ->route('sections.edit', $section)
-                ->with('warning', "No new Subject Offerings were created — {$skippedExisting} Subject(s) were already offered to {$section->section_code} this Term.");
+                ->with('warning', "No new Subjects were attached — {$skippedExisting} Subject(s) were already offered or fulfilled for {$section->section_code} this Term.");
         }
 
-        $message = "{$created} Subject Offering(s) attached to {$section->section_code}.";
+        $messageParts = [];
+
+        if ($created > 0) {
+            $messageParts[] = "{$created} new Subject Offering(s) generated";
+        }
+
+        if ($reused > 0) {
+            $messageParts[] = "{$reused} Subject(s) covered by reusing an existing Regular Section's EDP Code (no new EDP Code created)";
+        }
+
+        $message = implode('; ', $messageParts) . " for {$section->section_code}.";
 
         if ($skippedExisting > 0) {
             $message .= " {$skippedExisting} already existed and were left untouched.";
@@ -699,16 +858,19 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             action: 'generated',
             module: 'Subject Offering',
             model: $section,
-            description: "Manually attached {$created} Subject Offering(s) to Irregular Section {$section->section_code}",
+            description: "Manually attached Subjects to Irregular Section {$section->section_code} ({$created} new, {$reused} reused)",
             newValues: [
                 'section_code' => $section->section_code,
                 'academic_term' => $academicTerm->display_name,
                 'edp_codes' => $createdCodes,
+                'reused_edp_codes' => $reusedCodes,
             ],
             recordName: $section->section_code,
         );
 
-        $this->notifyDepartmentOfGeneration($section->curriculum, $academicTerm, auth()->user(), $created);
+        if ($created > 0) {
+            $this->notifyDepartmentOfGeneration($section->curriculum, $academicTerm, auth()->user(), $created);
+        }
 
         return redirect()
             ->route('sections.edit', $section)

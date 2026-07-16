@@ -76,6 +76,76 @@ function clearActive() {
     activeFeature.value = null;
 }
 
+// ===================== FEATURES CAROUSEL =====================
+const activeIndex = ref(0);
+let autoplayTimer = null;
+
+function goTo(i) {
+    activeIndex.value = i;
+    restartAutoplay();
+}
+function nextSlide() {
+    activeIndex.value = (activeIndex.value + 1) % capabilities.length;
+    restartAutoplay();
+}
+function prevSlide() {
+    activeIndex.value = (activeIndex.value - 1 + capabilities.length) % capabilities.length;
+    restartAutoplay();
+}
+function startAutoplay() {
+    stopAutoplay();
+    autoplayTimer = setInterval(() => {
+        activeIndex.value = (activeIndex.value + 1) % capabilities.length;
+    }, 3800);
+}
+function stopAutoplay() {
+    if (autoplayTimer) {
+        clearInterval(autoplayTimer);
+        autoplayTimer = null;
+    }
+}
+function restartAutoplay() {
+    startAutoplay();
+}
+
+function offsetFor(i) {
+    const n = capabilities.length;
+    let diff = i - activeIndex.value;
+    if (diff > n / 2) diff -= n;
+    if (diff < -n / 2) diff += n;
+    return diff;
+}
+
+function carouselStyle(i) {
+    const offset = offsetFor(i);
+    const abs = Math.abs(offset);
+    const visible = abs <= 2;
+    return {
+        transform: `translate(-50%, -50%) translateX(${offset * 62}%) translateY(${abs * 10}px) scale(${Math.max(1 - abs * 0.18, 0.6)}) rotateY(${offset * -10}deg)`,
+        opacity: visible ? Math.max(1 - abs * 0.4, 0) : 0,
+        zIndex: 20 - abs,
+        filter: abs === 0 ? 'none' : `blur(${abs * 0.5}px)`,
+        transition: 'transform 0.6s cubic-bezier(0.16,1,0.3,1), opacity 0.6s ease, filter 0.6s ease',
+    };
+}
+
+// touch/drag swipe support
+let dragStartX = null;
+function onDragStart(e) {
+    dragStartX = e.touches ? e.touches[0].clientX : e.clientX;
+}
+function onDragEnd(e) {
+    if (dragStartX === null) return;
+    const endX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
+    const delta = endX - dragStartX;
+    if (delta > 40) {
+        prevSlide();
+    } else if (delta < -40) {
+        nextSlide();
+    }
+    dragStartX = null;
+}
+
 // ===================== NAV / SCROLL SPY =====================
 const navItems = [
     { key: 'home', label: 'Home' },
@@ -105,10 +175,12 @@ onMounted(() => {
         { root: null, threshold: 0.5 },
     );
     sections.forEach((s) => observer.observe(s));
+    startAutoplay();
 });
 
 onBeforeUnmount(() => {
     if (observer) observer.disconnect();
+    stopAutoplay();
 });
 
 // Fixed positions/timings so the drift feels organic without being random on every render
@@ -397,12 +469,25 @@ const bubbles = [
                         </p>
                     </div>
 
-                    <div class="grid grid-cols-3 gap-4 sm:gap-5 animate-[entrance_0.8s_cubic-bezier(0.16,1,0.3,1)_0.1s_both]">
+                    <div
+                        class="relative w-full animate-[entrance_0.8s_cubic-bezier(0.16,1,0.3,1)_0.1s_both]"
+                        @mouseenter="stopAutoplay"
+                        @mouseleave="startAutoplay"
+                    >
+                        <!-- carousel viewport -->
+                        <div
+                            class="relative mx-auto h-[240px] w-full max-w-sm [perspective:1600px] sm:h-[280px] sm:max-w-md lg:h-[320px] lg:max-w-lg"
+                            @touchstart.passive="onDragStart"
+                            @touchend.passive="onDragEnd"
+                            @mousedown="onDragStart"
+                            @mouseup="onDragEnd"
+                        >
                         <div
                             v-for="(capability, i) in capabilities"
                             :key="capability.name"
-                            class="holo-card group relative h-44 w-full cursor-default overflow-hidden rounded-3xl border border-[#16213E]/10 bg-white/60 p-5 shadow-lg backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-[--hc]/50 hover:bg-white hover:shadow-[0_14px_34px_-10px_var(--hc)] dark:border-[#F3EFE6]/10 dark:bg-[#151B2E]/60 dark:hover:bg-[#151B2E] sm:h-52 lg:h-60"
-                            :style="{ '--hc': capability.color + '66', animationDelay: `${0.15 + i * 0.06}s` }"
+                            class="holo-card group absolute left-1/2 top-1/2 h-44 w-64 cursor-pointer select-none overflow-hidden rounded-3xl border border-[#16213E]/10 bg-white/60 p-5 shadow-lg backdrop-blur-xl hover:border-[--hc]/50 hover:bg-white hover:shadow-[0_14px_34px_-10px_var(--hc)] dark:border-[#F3EFE6]/10 dark:bg-[#151B2E]/60 dark:hover:bg-[#151B2E] sm:h-52 sm:w-72 lg:h-60 lg:w-80"
+                            :style="{ '--hc': capability.color + '66', ...carouselStyle(i) }"
+                            @click="goTo(i)"
                             @mouseenter="setActive(capability.key)"
                             @mouseleave="clearActive"
                         >
@@ -564,6 +649,43 @@ const bubbles = [
                                     {{ capability.description }}
                                 </p>
                             </div>
+                        </div>
+                        </div>
+
+                        <!-- prev/next arrows -->
+                        <button
+                            type="button"
+                            aria-label="Previous feature"
+                            class="absolute left-0 top-1/2 z-30 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-[#16213E]/10 bg-white/80 text-[#16213E] shadow-md backdrop-blur transition hover:scale-110 hover:bg-white dark:border-[#F3EFE6]/10 dark:bg-[#151B2E]/80 dark:text-[#F3EFE6] sm:h-10 sm:w-10"
+                            @click="prevSlide"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                            </svg>
+                        </button>
+                        <button
+                            type="button"
+                            aria-label="Next feature"
+                            class="absolute right-0 top-1/2 z-30 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-[#16213E]/10 bg-white/80 text-[#16213E] shadow-md backdrop-blur transition hover:scale-110 hover:bg-white dark:border-[#F3EFE6]/10 dark:bg-[#151B2E]/80 dark:text-[#F3EFE6] sm:h-10 sm:w-10"
+                            @click="nextSlide"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                            </svg>
+                        </button>
+
+                        <!-- dot indicators -->
+                        <div class="mt-6 flex items-center justify-center gap-2">
+                            <button
+                                v-for="(capability, i) in capabilities"
+                                :key="`dot-${capability.key}`"
+                                type="button"
+                                :aria-label="`Go to ${capability.name}`"
+                                class="h-2 rounded-full transition-all duration-300"
+                                :class="i === activeIndex ? 'w-6' : 'w-2 bg-[#16213E]/20 dark:bg-[#F3EFE6]/20'"
+                                :style="i === activeIndex ? { backgroundColor: capability.color } : {}"
+                                @click="goTo(i)"
+                            ></button>
                         </div>
                     </div>
                 </div>

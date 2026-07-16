@@ -54,6 +54,16 @@ class Section extends Model
         return $this->hasMany(SubjectOffering::class);
     }
 
+    /**
+     * Subjects this (Irregular) Section needed that were fulfilled by
+     * an existing Regular Section's Subject Offering instead of a new
+     * one being generated for it — see IrregularSubjectFulfillment.
+     */
+    public function irregularFulfillments()
+    {
+        return $this->hasMany(IrregularSubjectFulfillment::class);
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Accessors & Attributes
