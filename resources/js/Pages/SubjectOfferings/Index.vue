@@ -251,6 +251,84 @@ function roomDropdownOptionsFor(offering) {
 
 /*
 |--------------------------------------------------------------------------
+| Override Eligibility (Faculty / Room)
+|--------------------------------------------------------------------------
+|
+| Mirrors Master Grid's per-edit "Override Eligibility" checkbox in
+| EditScheduleModal.vue — normal Scope/Department (Faculty) and
+| Lecture/Laboratory (Room) rules are the right default almost always,
+| but real scheduling occasionally needs a deliberate exception (a
+| Major section covered by a Cross-Department faculty member, or an
+| SHTM section borrowing a CCS computer lab). Checking the box here
+| widens that ONE row's dropdown to every active Faculty / every Room,
+| full stop — the server re-checks the same override flag before
+| actually writing anything (see updateFaculty()/updatePreferredRoom()
+| below and assignFaculty()/setPreferredRoom() in the controller), so
+| this client-side widening is never the only thing standing between a
+| person and an ineligible pick.
+|
+| Tracked per-offering-id (a Set, same pattern as selectedIds above)
+| rather than one global flag, since many rows are visible on the page
+| at once. Always resets after a successful save — see
+| updateFaculty()/updatePreferredRoom() — so an override is a
+| deliberate choice made fresh each time, never an accidentally-sticky
+| setting left on for the next row someone edits.
+*/
+
+const facultyOverrideIds = ref(new Set())
+const roomOverrideIds = ref(new Set())
+
+function isFacultyOverridden(id) {
+    return facultyOverrideIds.value.has(id)
+}
+
+function setFacultyOverride(id, value) {
+    const next = new Set(facultyOverrideIds.value)
+    value ? next.add(id) : next.delete(id)
+    facultyOverrideIds.value = next
+}
+
+function isRoomOverridden(id) {
+    return roomOverrideIds.value.has(id)
+}
+
+function setRoomOverride(id, value) {
+    const next = new Set(roomOverrideIds.value)
+    value ? next.add(id) : next.delete(id)
+    roomOverrideIds.value = next
+}
+
+// Every active faculty / every room, unfiltered — what the dropdown
+// swaps to while Override Eligibility is checked for that row. Same
+// load-aware disabled/label treatment as facultyDropdownOptionsFor()
+// above, since Max Units is a real constraint the server still
+// enforces even during an override (only Scope/Department is
+// skippable — see TeachingAssignmentService::assertBusinessRules()).
+function facultyOverrideOptionsFor(offering) {
+    const currentId = offering.teaching_assignment?.faculty?.id
+    const neededUnits = offering.units ?? 0
+
+    // props.faculties is already scoped to active faculty only (see
+    // SubjectOfferingController::index()'s 'faculties' ->
+    // where('status', true)) — no extra filtering needed here.
+    return props.faculties.map(f => {
+        const isCurrent = f.id === currentId
+        const wouldExceed = ! isCurrent && neededUnits > (f.remaining_units ?? Infinity)
+
+        return {
+            id: f.id,
+            label: wouldExceed ? `${f.full_name} — Full Load` : f.full_name,
+            disabled: wouldExceed,
+        }
+    })
+}
+
+function roomOverrideOptionsFor() {
+    return props.rooms.map(r => ({ id: r.id, label: r.room_code }))
+}
+
+/*
+|--------------------------------------------------------------------------
 | Inline Faculty / Preferred Room
 |--------------------------------------------------------------------------
 |
@@ -266,10 +344,12 @@ const savingRoomId = ref(null)
 
 async function updateFaculty(offering, facultyId) {
     savingFacultyId.value = offering.id
+    const override = isFacultyOverridden(offering.id)
 
     try {
         const { data } = await axios.post(route('subject-offerings.assign-faculty', offering.id), {
             faculty_id: facultyId || null,
+            override,
         })
 
         flash.value = { type: 'success', message: data.message }
@@ -284,16 +364,21 @@ async function updateFaculty(offering, facultyId) {
         router.reload({ only: ['offerings'], preserveScroll: true, preserveState: true })
     } finally {
         savingFacultyId.value = null
+        // Always resets, success or failure — a deliberate choice made
+        // fresh each time, never left on for the next row.
+        setFacultyOverride(offering.id, false)
         setTimeout(() => { flash.value = null }, 6000)
     }
 }
 
 async function updatePreferredRoom(offering, roomId) {
     savingRoomId.value = offering.id
+    const override = isRoomOverridden(offering.id)
 
     try {
         const { data } = await axios.put(route('subject-offerings.set-preferred-room', offering.id), {
             room_id: roomId || null,
+            override,
         })
 
         flash.value = { type: 'success', message: data.message }
@@ -306,6 +391,7 @@ async function updatePreferredRoom(offering, roomId) {
         router.reload({ only: ['offerings'], preserveScroll: true, preserveState: true })
     } finally {
         savingRoomId.value = null
+        setRoomOverride(offering.id, false)
         setTimeout(() => { flash.value = null }, 6000)
     }
 }
@@ -315,15 +401,19 @@ async function updatePreferredRoom(offering, roomId) {
 | Bulk Update Weekly Hours
 |--------------------------------------------------------------------------
 |
-| Selection is scoped to the CURRENT page's rows (offerings.data) —
-| the same set the "Select All" checkbox in the header toggles. This
-| intentionally mirrors what "currently filtered rows" means once the
-| table is paginated: a bulk action can only ever act on rows the
-| Registrar can actually see and confirm in the modal below, not on
-| every row across every page that happens to match the filters.
+| Selection now persists across pagination — checking rows on page 1,
+| then paging to page 2 and checking more, keeps everything checked
+| until Apply, Cancel, or the filters themselves change (a different
+| Academic Term/Program/etc. makes the previous selection meaningless,
+| so that still resets it — see applyFilters()). selectedOfferingsCache
+| holds the display fields (edp_code, subject_code, hours, ...) for
+| every selected row regardless of which page it came from, since
+| props.offerings.data only ever holds the CURRENT page and can't be
+| relied on once the person has paged away.
 */
 
 const selectedIds = ref(new Set())
+const selectedOfferingsCache = reactive(new Map())
 const showBulkModal = ref(false)
 const bulkSubmitting = ref(false)
 const flash = ref(null)
@@ -344,12 +434,24 @@ function isSelected(id) {
     return selectedIds.value.has(id)
 }
 
-function toggleRow(id) {
+function cacheOffering(offering) {
+    selectedOfferingsCache.set(offering.id, {
+        id: offering.id,
+        edp_code: offering.edp_code,
+        subject_code: offering.subject?.subject_code ?? offering.edp_code,
+        descriptive_title: offering.subject?.descriptive_title ?? '',
+        hours: offering.hours,
+    })
+}
+
+function toggleRow(offering) {
     const next = new Set(selectedIds.value)
-    if (next.has(id)) {
-        next.delete(id)
+    if (next.has(offering.id)) {
+        next.delete(offering.id)
+        selectedOfferingsCache.delete(offering.id)
     } else {
-        next.add(id)
+        next.add(offering.id)
+        cacheOffering(offering)
     }
     selectedIds.value = next
 }
@@ -358,38 +460,29 @@ function toggleSelectAllOnPage() {
     const next = new Set(selectedIds.value)
 
     if (allOnPageSelected.value) {
-        currentPageIds.value.forEach(id => next.delete(id))
+        currentPageIds.value.forEach(id => {
+            next.delete(id)
+            selectedOfferingsCache.delete(id)
+        })
     } else {
-        currentPageIds.value.forEach(id => next.add(id))
+        props.offerings.data.forEach(offering => {
+            next.add(offering.id)
+            cacheOffering(offering)
+        })
     }
 
     selectedIds.value = next
 }
 
 const selectedOfferings = computed(() => {
-    // Defensive de-dupe by id. selectedIds is a Set, so it can never
-    // itself hold a duplicate — but if offerings.data ever contains
-    // two row objects sharing the same id (e.g. a stale/merged page
-    // reload), a plain .filter() would match both copies and the
-    // modal would show every selected subject twice with a count
-    // that doesn't match the "Selected N" bar above the table. Using
-    // a Map keyed by id guarantees exactly one entry per id no matter
-    // how many times it appears in the source array.
-    const byId = new Map()
-
-    for (const o of props.offerings.data) {
-        if (selectedIds.value.has(o.id) && ! byId.has(o.id)) {
-            byId.set(o.id, {
-                id: o.id,
-                edp_code: o.edp_code,
-                subject_code: o.subject?.subject_code ?? o.edp_code,
-                descriptive_title: o.subject?.descriptive_title ?? '',
-                hours: o.hours,
-            })
-        }
-    }
-
-    return Array.from(byId.values())
+    // Sourced from selectedOfferingsCache (populated as rows are
+    // checked, across every page visited) rather than
+    // props.offerings.data, which only ever holds the current page —
+    // reading from offerings.data here would silently drop anything
+    // selected on a page the person has since navigated away from.
+    return Array.from(selectedIds.value)
+        .map(id => selectedOfferingsCache.get(id))
+        .filter(Boolean)
 })
 
 function openBulkModal() {
@@ -414,6 +507,7 @@ async function applyBulkUpdate(newHours) {
         flash.value = { type: 'success', message: data.message }
         showBulkModal.value = false
         selectedIds.value = new Set()
+        selectedOfferingsCache.clear()
 
         // Reload only the `offerings` prop — filters, sort order, and
         // the current page all stay exactly as they were, per spec.
@@ -429,11 +523,19 @@ async function applyBulkUpdate(newHours) {
     }
 }
 
-// A page reload (new filters/sort/page) invalidates any selection
-// made against the previous set of rows.
-watch(() => props.offerings.data, () => {
-    selectedIds.value = new Set()
-})
+// Only an actual filter change (Academic Term/Program/Specialization/
+// Year/Section/Status/Search) invalidates the current selection —
+// paging through offerings.data via the Link pagination below must
+// NOT clear it, that's the whole point of persisting selection
+// across pages. See applyFilters() above, the sole place these
+// filters are submitted.
+watch(
+    () => [form.academic_term_id, form.program_id, form.specialization_id, form.year_level, form.section_id, form.status, form.search],
+    () => {
+        selectedIds.value = new Set()
+        selectedOfferingsCache.clear()
+    }
+)
 </script>
 
 <template>
@@ -674,7 +776,7 @@ watch(() => props.offerings.data, () => {
                                     type="checkbox"
                                     class="h-4.5 w-4.5 cursor-pointer rounded border-2 border-[#8A94A6] bg-white text-[#D4A62A] accent-[#D4A62A] focus:ring-2 focus:ring-[#D4A62A]/40"
                                     :checked="isSelected(offering.id)"
-                                    @change="toggleRow(offering.id)"
+                                    @change="toggleRow(offering)"
                                 />
                             </td>
                             <td class="px-4 py-3 font-mono font-medium text-[var(--text-primary)]">
@@ -717,7 +819,11 @@ watch(() => props.offerings.data, () => {
                                     :disabled="savingFacultyId === offering.id"
                                     :badge-class="assignmentBadgeClass(offering.faculty_status)"
                                     max-width-class="max-w-[180px]"
+                                    overridable
+                                    :override="isFacultyOverridden(offering.id)"
+                                    :override-options="facultyOverrideOptionsFor(offering)"
                                     @update:model-value="value => updateFaculty(offering, value)"
+                                    @update:override="value => setFacultyOverride(offering.id, value)"
                                 />
                                 <span
                                     v-else
@@ -735,7 +841,11 @@ watch(() => props.offerings.data, () => {
                                     :disabled="savingRoomId === offering.id"
                                     :badge-class="assignmentBadgeClass(offering.room_status)"
                                     max-width-class="max-w-[160px]"
+                                    overridable
+                                    :override="isRoomOverridden(offering.id)"
+                                    :override-options="roomOverrideOptionsFor()"
                                     @update:model-value="value => updatePreferredRoom(offering, value)"
+                                    @update:override="value => setRoomOverride(offering.id, value)"
                                 />
                                 <span
                                     v-else

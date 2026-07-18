@@ -274,7 +274,6 @@ function onCardClick(offering) {
                     <span>{{ offering.classification }}</span>
                     <span class="col-span-2 truncate">Faculty: <strong class="font-bold" style="color: var(--text-primary)">{{ offering.faculty_assigned ?? '—' }}</strong></span>
                     <span class="col-span-2 truncate">Pref. Room: <strong class="font-bold" style="color: var(--text-primary)">{{ offering.preferred_room_code ?? '—' }}</strong></span>
-                    <span class="col-span-2 truncate">Pref. Faculty: <strong class="font-bold" style="color: var(--text-primary)">{{ offering.preferred_faculty_name ?? '—' }}</strong></span>
                     <span class="col-span-2">Room Type: <strong class="font-bold" style="color: var(--text-primary)">{{ offering.room_type ?? '—' }}</strong></span>
                 </div>
             </div>

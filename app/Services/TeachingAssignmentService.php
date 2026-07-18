@@ -41,8 +41,16 @@ class TeachingAssignmentService
      * even though the current UI only ever creates assignments (there
      * is no "edit an existing assignment" flow — you remove and
      * reassign instead).
+     *
+     * $overrideEligibility skips ONLY assertFacultyScopeAllowsSubject()
+     * — the Scope/Department rule table — for a deliberate, per-edit
+     * exception (e.g. a Major section covered by a Cross-Department
+     * faculty member because the home department has no one free).
+     * Mirrors Master Grid's "Override Eligibility" checkbox. Academic
+     * Term, Active Faculty, and Max Units are real constraints, not
+     * eligibility preferences, so they are never skippable.
      */
-    public function assertBusinessRules(array $validated, ?TeachingAssignment $teachingAssignment = null): void
+    public function assertBusinessRules(array $validated, ?TeachingAssignment $teachingAssignment = null, bool $overrideEligibility = false): void
     {
         $offering = SubjectOffering::with(['subject', 'curriculum.program', 'academicTerm'])
             ->findOrFail($validated['subject_offering_id']);
@@ -51,7 +59,11 @@ class TeachingAssignmentService
 
         $this->assertAcademicTermIsActive($offering);
         $this->assertFacultyIsActive($faculty);
-        $this->assertFacultyScopeAllowsSubject($faculty, $offering);
+
+        if (! $overrideEligibility) {
+            $this->assertFacultyScopeAllowsSubject($faculty, $offering);
+        }
+
         $this->assertWithinMaxUnits($validated, $faculty, $offering, $teachingAssignment);
     }
 

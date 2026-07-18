@@ -13,9 +13,19 @@ const props = defineProps({
     badgeClass: { type: String, default: '' },
     placeholder: { type: String, default: 'Unassigned' },
     maxWidthClass: { type: String, default: 'max-w-[180px]' },
+    // Shows an "Override Eligibility" checkbox above the search box.
+    // When checked, the dropdown swaps `options` for `overrideOptions`
+    // (the full, unfiltered list) — same concept as Master Grid's
+    // per-edit Override Eligibility checkbox. Off by default and left
+    // to the parent to reset after each use (see Index.vue), so an
+    // override is a deliberate choice made fresh each time, never an
+    // accidentally-sticky setting.
+    overridable: { type: Boolean, default: false },
+    override: { type: Boolean, default: false },
+    overrideOptions: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'update:override'])
 
 const open = ref(false)
 const triggerRef = ref(null)
@@ -24,8 +34,10 @@ const searchInputRef = ref(null)
 const menuStyle = ref({})
 const query = ref('')
 
+const activeOptions = computed(() => (props.overridable && props.override) ? props.overrideOptions : props.options)
+
 const selectedLabel = computed(() => {
-    const match = props.options.find(o => String(o.id) === String(props.modelValue))
+    const match = activeOptions.value.find(o => String(o.id) === String(props.modelValue))
     return match ? match.label : props.placeholder
 })
 
@@ -34,9 +46,9 @@ const selectedLabel = computed(() => {
 // (fuzzy matching, ranking) would be overkill.
 const filteredOptions = computed(() => {
     const q = query.value.trim().toLowerCase()
-    if (! q) return props.options
+    if (! q) return activeOptions.value
 
-    return props.options.filter(o => o.label.toLowerCase().includes(q))
+    return activeOptions.value.filter(o => o.label.toLowerCase().includes(q))
 })
 
 function positionMenu() {
@@ -128,6 +140,20 @@ onBeforeUnmount(cleanupListeners)
                 :style="menuStyle"
                 class="z-50 flex flex-col overflow-hidden rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] shadow-lg"
             >
+                <label
+                    v-if="overridable"
+                    class="flex items-center gap-1.5 border-b border-[var(--card-border)] px-2.5 py-1.5 text-[11px] font-semibold cursor-pointer select-none"
+                    :class="override ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'"
+                >
+                    <input
+                        type="checkbox"
+                        class="rounded"
+                        :checked="override"
+                        @change="emit('update:override', $event.target.checked)"
+                    />
+                    Override Eligibility
+                </label>
+
                 <div class="border-b border-[var(--card-border)] p-1.5">
                     <input
                         ref="searchInputRef"

@@ -83,7 +83,6 @@ class MasterGridDataService
 
         $programDepartmentMap = $this->programDepartmentMap();
         $preferredRoomByOffering = $this->preferredRoomByOffering($activeTerm->id);
-        $preferredFacultyByOffering = $this->preferredFacultyByOffering($activeTerm->id);
 
         // "Scheduled" for this split means Scheduled/Completed/Archived
         // — same list presentOffering()'s 'is_scheduled' flag already
@@ -135,8 +134,7 @@ class MasterGridDataService
                 ->map(fn (SubjectOffering $offering) => $this->presentOffering(
                     $offering,
                     $programDepartmentMap,
-                    $preferredRoomByOffering,
-                    $preferredFacultyByOffering
+                    $preferredRoomByOffering
                 ))
                 ->values(),
 
@@ -156,8 +154,7 @@ class MasterGridDataService
                 ->map(fn (SubjectOffering $offering) => $this->presentOffering(
                     $offering,
                     $programDepartmentMap,
-                    $preferredRoomByOffering,
-                    $preferredFacultyByOffering
+                    $preferredRoomByOffering
                 ))
                 ->values(),
 
@@ -321,8 +318,7 @@ class MasterGridDataService
     private function presentOffering(
         SubjectOffering $offering,
         array $programDepartmentMap,
-        array $preferredRoomByOffering,
-        array $preferredFacultyByOffering
+        array $preferredRoomByOffering
     ): array {
         $collegeCode = $offering->program?->department?->abbreviation
             ?? $programDepartmentMap[$offering->program?->code] ?? null
@@ -386,7 +382,6 @@ class MasterGridDataService
             // onto the grid.
             'faculty_id' => $offering->teachingAssignment?->faculty_id,
             'preferred_room_code' => $preferredRoomByOffering[$offering->id] ?? null,
-            'preferred_faculty_name' => $preferredFacultyByOffering[$offering->id] ?? null,
             'overall_status' => $overallStatus,
             'is_scheduled' => in_array($overallStatus, [
                 SubjectOffering::STATUS_SCHEDULED,
@@ -517,41 +512,6 @@ class MasterGridDataService
             ->get(['room_subject_offering.subject_offering_id', 'rooms.room_code'])
             ->groupBy('subject_offering_id')
             ->map(fn ($rows) => $rows->first()->room_code)
-            ->all();
-    }
-
-    /**
-     * subject_offering_id => preferred faculty full name, IF a
-     * faculty-preference table exists. There is no such table in the
-     * schema today — Teaching Assignments (Faculty Loading) is the
-     * only place a Faculty is actually attached to an Offering, and
-     * that's already surfaced separately as "Faculty Assigned".
-     *
-     * This is a forward-compatible placeholder, mirroring the same
-     * defensive Schema::hasTable() pattern SubjectOffering already
-     * uses for room_status/overall_status: if a future
-     * "faculty_subject_offering" preference table ships with the same
-     * shape as room_subject_offering, this starts populating
-     * automatically with no other change needed. Until then it always
-     * returns an empty map, and the frontend simply shows "—".
-     */
-    private function preferredFacultyByOffering(int $academicTermId): array
-    {
-        if (! Schema::hasTable('faculty_subject_offering')) {
-            return [];
-        }
-
-        return DB::table('faculty_subject_offering')
-            ->join('faculties', 'faculties.id', '=', 'faculty_subject_offering.faculty_id')
-            ->join('subject_offerings', 'subject_offerings.id', '=', 'faculty_subject_offering.subject_offering_id')
-            ->where('subject_offerings.academic_term_id', $academicTermId)
-            ->orderBy('faculty_subject_offering.id')
-            ->get([
-                'faculty_subject_offering.subject_offering_id',
-                DB::raw("TRIM(CONCAT(faculties.first_name, ' ', faculties.last_name)) as full_name"),
-            ])
-            ->groupBy('subject_offering_id')
-            ->map(fn ($rows) => $rows->first()->full_name)
             ->all();
     }
 

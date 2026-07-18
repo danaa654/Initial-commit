@@ -581,6 +581,14 @@ function handleSubjectCardClick(offering) {
     const durationMinutes = offering.hours ? Math.round((offering.hours / meetings) * 60) : null
     const endMinutes = durationMinutes !== null && defaultStart !== null ? defaultStart + durationMinutes : null
 
+    // Pre-fill Room from the offering's Preferred Room (set on Subject
+    // Offerings) so the modal doesn't open with Room blank when a
+    // preference already exists — same lookup-by-room_code pattern
+    // openEditModal/applyEdit use elsewhere in this file.
+    const preferredRoom = offering.preferred_room_code
+        ? props.rooms.find((r) => r.room_code === offering.preferred_room_code)
+        : null
+
     const block = {
         subject_offering_id: offering.id,
         academic_term_id: offering.academic_term_id,
@@ -598,8 +606,8 @@ function handleSubjectCardClick(offering) {
         room_type: offering.room_type,
         faculty_id: offering.faculty_id ?? null,
         faculty_name: offering.faculty_assigned ?? null,
-        room_id: null,
-        room_code: null,
+        room_id: preferredRoom?.id ?? null,
+        room_code: preferredRoom?.room_code ?? null,
         day: defaultDay,
         start_minutes: defaultStart,
         end_minutes: endMinutes,

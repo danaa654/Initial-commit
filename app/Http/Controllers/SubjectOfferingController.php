@@ -1100,7 +1100,10 @@ class SubjectOfferingController extends Controller implements HasMiddleware
 
         $validated = $request->validate([
             'faculty_id' => ['nullable', 'exists:faculties,id'],
+            'override' => ['sometimes', 'boolean'],
         ]);
+
+        $override = $validated['override'] ?? false;
 
         $this->workspace->assertWritable($subjectOffering->academicTerm);
 
@@ -1141,7 +1144,7 @@ class SubjectOfferingController extends Controller implements HasMiddleware
         // precisely because this check, not the dropdown's contents,
         // is the real authorization boundary.
         try {
-            $this->teachingAssignmentService->assertBusinessRules($payload, $existing);
+            $this->teachingAssignmentService->assertBusinessRules($payload, $existing, $override);
         } catch (ValidationException $e) {
             return response()->json(['message' => collect($e->errors())->flatten()->first()], 422);
         }
@@ -1160,11 +1163,14 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             action: 'assigned',
             module: 'Faculty Loading',
             model: $faculty,
-            description: "Assigned {$faculty?->full_name} to {$subjectOffering->section?->section_code} {$subjectOffering->edp_code}",
+            description: $override
+                ? "Assigned {$faculty?->full_name} to {$subjectOffering->section?->section_code} {$subjectOffering->edp_code} (Eligibility Override)"
+                : "Assigned {$faculty?->full_name} to {$subjectOffering->section?->section_code} {$subjectOffering->edp_code}",
             newValues: [
                 'faculty' => $faculty?->full_name,
                 'subject_offering' => $subjectOffering->edp_code,
                 'section' => $subjectOffering->section?->section_code,
+                'override' => $override,
             ],
             recordName: "{$subjectOffering->section?->section_code} {$subjectOffering->edp_code}",
         );
@@ -1201,7 +1207,10 @@ class SubjectOfferingController extends Controller implements HasMiddleware
 
         $validated = $request->validate([
             'room_id' => ['nullable', 'exists:rooms,id'],
+            'override' => ['sometimes', 'boolean'],
         ]);
+
+        $override = $validated['override'] ?? false;
 
         $this->workspace->assertWritable($subjectOffering->academicTerm);
 
@@ -1209,7 +1218,13 @@ class SubjectOfferingController extends Controller implements HasMiddleware
         // syncPreferredSubjects() — a Lecture offering can only prefer
         // a Lecture room, a Laboratory offering only a Laboratory room.
         // Re-checked here (not just filtered out of the dropdown) so a
-        // direct API call can't smuggle in a mismatched room.
+        // direct API call can't smuggle in a mismatched room. Skipped
+        // when $override is set — a deliberate, per-edit exception
+        // (e.g. an SHTM section borrowing a CCS computer lab), same
+        // "Override Eligibility" concept as Master Grid's Room
+        // override and assignFaculty()'s above. The weekly-capacity
+        // check below is a real constraint, not an eligibility rule,
+        // so it is never skippable.
         //
         // NOTE: unlike syncPreferredSubjects(), this does NOT run
         // RoomCapacityService's weekly-hours capacity check — that
@@ -1220,7 +1235,7 @@ class SubjectOfferingController extends Controller implements HasMiddleware
         if ($validated['room_id']) {
             $room = Room::findOrFail($validated['room_id']);
 
-            if ($room->room_type !== $subjectOffering->room_type) {
+            if (! $override && $room->room_type !== $subjectOffering->room_type) {
                 return response()->json([
                     'message' => "{$room->room_code} is a {$room->room_type} room — {$subjectOffering->edp_code} requires {$subjectOffering->room_type}.",
                 ], 422);
@@ -1261,9 +1276,11 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             module: 'Subject Offering',
             model: $subjectOffering,
             description: $room
-                ? "Set Preferred Room {$room->room_code} for {$subjectOffering->edp_code}"
+                ? ($override
+                    ? "Set Preferred Room {$room->room_code} for {$subjectOffering->edp_code} (Eligibility Override)"
+                    : "Set Preferred Room {$room->room_code} for {$subjectOffering->edp_code}")
                 : "Cleared Preferred Room for {$subjectOffering->edp_code}",
-            newValues: ['preferred_room' => $room?->room_code],
+            newValues: ['preferred_room' => $room?->room_code, 'override' => $override],
             recordName: $subjectOffering->edp_code,
         );
 
