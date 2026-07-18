@@ -83,11 +83,11 @@ const sectionsForSelection = computed(() => {
         )
         .forEach((offering) => {
             if (offering.section_id && !seen.has(offering.section_id)) {
-                seen.set(offering.section_id, offering.section_code)
+                seen.set(offering.section_id, { code: offering.section_code, isIrregular: !!offering.is_irregular })
             }
         })
 
-    return Array.from(seen, ([id, code]) => ({ id, code }))
+    return Array.from(seen, ([id, { code, isIrregular }]) => ({ id, code, isIrregular }))
 })
 
 const canGenerate = computed(() => {
@@ -171,7 +171,7 @@ function proceedToSessionSettings() {
                             {{ !programId || !yearLevel ? 'Select program and year first' : 'Select section' }}
                         </option>
                         <option v-for="section in sectionsForSelection" :key="section.id" :value="section.id">
-                            {{ section.code }}
+                            {{ section.code }}{{ section.isIrregular ? ' (Irregular)' : '' }}
                         </option>
                     </select>
                     <p v-if="programId && yearLevel && sectionsForSelection.length === 0" class="text-[11px] text-amber-600 mt-1">

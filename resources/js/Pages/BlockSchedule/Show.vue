@@ -37,7 +37,15 @@ function timeRange(row) {
             </Link>
 
             <div class="mb-6">
-                <h1 class="text-2xl font-extrabold tracking-tight text-slate-900">{{ section.section_code }}</h1>
+                <h1 class="text-2xl font-extrabold tracking-tight text-slate-900 flex items-center gap-2">
+                    {{ section.section_code }}
+                    <span
+                        v-if="section.is_irregular"
+                        class="inline-flex items-center px-2 py-0.5 rounded-full bg-[#D4A62A]/10 text-[#D4A62A] text-xs font-bold uppercase tracking-wide border border-[#D4A62A]/30"
+                    >
+                        Irregular
+                    </span>
+                </h1>
                 <p class="text-sm font-medium text-slate-400">
                     {{ department.name }} — Year {{ section.year_level }}
                     <span v-if="academicTerm"> — {{ academicTerm.display_name }}</span>
@@ -64,6 +72,9 @@ function timeRange(row) {
                             <td class="px-5 py-3">
                                 <p class="font-semibold text-slate-900">{{ row.subject_code }}</p>
                                 <p class="text-xs text-slate-400">{{ row.descriptive_title }}</p>
+                                <p v-if="row.reused_from_section" class="mt-1 text-[11px] font-semibold text-emerald-600">
+                                    Covered by {{ row.reused_from_section }} — same schedule shared with that Section
+                                </p>
                             </td>
                             <td class="px-5 py-3 text-sm font-medium text-slate-700">
                                 {{ row.units ?? '—' }}

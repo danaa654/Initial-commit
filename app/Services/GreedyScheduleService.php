@@ -1225,6 +1225,7 @@ class GreedyScheduleService
             'edp_code' => $offering->edp_code,
             'section_id' => $offering->section_id,
             'section_code' => $offering->section?->section_code,
+            'is_irregular' => (bool) $offering->section?->is_irregular,
             'year_level' => $offering->year_level,
             'program_id' => $offering->program_id,
             'program_code' => $offering->program?->code,

@@ -291,7 +291,12 @@
                 </div>
                 <div class="meta-item">
                     <div class="label">Block</div>
-                    <div class="value">{{ $block['section_code'] }}</div>
+                    <div class="value">
+                        {{ $block['section_code'] }}
+                        @if (! empty($block['is_irregular']))
+                            <span style="color: #92700f; font-weight: 700; font-size: 0.85em;">(Irregular)</span>
+                        @endif
+                    </div>
                 </div>
             </div>
 
@@ -313,6 +318,11 @@
                             <td>
                                 <div>{{ $offering['subject_code'] }}</div>
                                 <div class="subject-title">{{ $offering['descriptive_title'] }}</div>
+                                @if (! empty($offering['reused_from_section']))
+                                    <div class="subject-title" style="color: #059669; font-weight: 600;">
+                                        Covered by {{ $offering['reused_from_section'] }}
+                                    </div>
+                                @endif
                             </td>
                             <td class="center">{{ $offering['units'] ?? '—' }}</td>
                             <td>

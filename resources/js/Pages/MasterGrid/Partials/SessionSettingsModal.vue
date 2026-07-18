@@ -157,7 +157,16 @@ function generate() {
     <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
         <div class="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col p-5">
             <div class="flex items-center justify-between mb-2">
-                <h3 class="font-black text-slate-800 dark:text-slate-100">Session Settings</h3>
+                <h3 class="font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    Session Settings
+                    <span
+                        v-if="data?.is_irregular"
+                        class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wide"
+                        style="background: rgba(212, 166, 42, 0.15); color: #92700f; border: 1px solid rgba(212, 166, 42, 0.4)"
+                    >
+                        Irregular Section
+                    </span>
+                </h3>
                 <button type="button" class="text-slate-400 hover:text-slate-600" @click="close">✕</button>
             </div>
 
@@ -168,6 +177,33 @@ function generate() {
                 still assigned automatically by the scheduler.
             </p>
 
+            <!-- Subjects this Irregular Section already has covered by an
+                 existing Regular Section's Subject Offering — they don't
+                 appear in the table below since they're not being
+                 scheduled here at all; the students simply sit in that
+                 Regular Section's already-scheduled class. Shown
+                 regardless of loading/empty state so it's never mistaken
+                 for "these subjects went missing". -->
+            <div
+                v-if="data?.fulfilled_elsewhere?.length"
+                class="mb-3 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2"
+            >
+                <p class="text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                    {{ data.fulfilled_elsewhere.length }} subject(s) already covered by an existing Regular Section — not scheduled here:
+                </p>
+                <ul class="mt-1 space-y-0.5">
+                    <li
+                        v-for="item in data.fulfilled_elsewhere"
+                        :key="item.id"
+                        class="text-[11px] text-emerald-600 dark:text-emerald-400"
+                    >
+                        <span class="font-mono">{{ item.edp_code }}</span>
+                        {{ item.subject_code }} — {{ item.descriptive_title }}
+                        <span class="text-emerald-500">will follow {{ item.fulfilled_by_section }}'s existing schedule (same time, faculty, room)</span>
+                    </li>
+                </ul>
+            </div>
+
             <!-- Loading -->
             <div v-if="loading" class="flex-1 flex items-center justify-center text-sm text-slate-500 py-10">
                 Loading subjects…
@@ -175,10 +211,15 @@ function generate() {
 
             <!-- Empty state: "Section has zero subjects configured -> disable Generate, show empty state" -->
             <div v-else-if="data && !data.has_offerings" class="flex-1 flex flex-col items-center justify-center text-center py-10 gap-2">
-                <p class="text-sm font-semibold text-slate-600 dark:text-slate-300">No Subject Offerings to schedule.</p>
+                <p class="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                    {{ data.fulfilled_elsewhere?.length
+                        ? 'Nothing left to schedule for this Section.'
+                        : 'No Subject Offerings to schedule.' }}
+                </p>
                 <p class="text-xs text-slate-400 max-w-sm">
-                    This section has no unscheduled Subject Offerings for the current Planning
-                    Academic Term. Generate Subject Offerings first, or pick a different section.
+                    {{ data.fulfilled_elsewhere?.length
+                        ? 'Every attached Subject is covered by an existing Regular Section\'s schedule (see above) — there\'s nothing of this Section\'s own left to run through the scheduler.'
+                        : 'This section has no unscheduled Subject Offerings for the current Planning Academic Term. Generate Subject Offerings first, or pick a different section.' }}
                 </p>
             </div>
 

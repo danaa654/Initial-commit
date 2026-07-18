@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Notifications\SubjectOfferingsGenerated;
 use App\Services\EdpCodeService;
 use App\Services\SchedulingWorkspaceService;
+use App\Services\RoomCapacityService;
 use App\Services\SubjectOfferingGeneratorService;
 use App\Services\TeachingAssignmentService;
 use App\Services\AuditLogService;
@@ -37,7 +38,8 @@ class SubjectOfferingController extends Controller implements HasMiddleware
     public function __construct(
         private readonly SubjectOfferingGeneratorService $generator,
         private readonly SchedulingWorkspaceService $workspace,
-        private readonly TeachingAssignmentService $teachingAssignmentService
+        private readonly TeachingAssignmentService $teachingAssignmentService,
+        private readonly RoomCapacityService $capacity
     ) {
     }
 
@@ -214,9 +216,46 @@ class SubjectOfferingController extends Controller implements HasMiddleware
             $offerings = $query->paginate($perPage)->withQueryString();
         }
 
+        // Reused Subjects don't get their own row in subject_offerings
+        // for this Section (see storeIrregular()'s IrregularSubjectFulfillment
+        // branch) — their EDP Code and section_id still belong to
+        // whichever Regular Section originally offered it. Without
+        // this, filtering the list by an Irregular Section that only
+        // reused existing offerings shows an empty table even though
+        // Subjects were successfully attached. Only computed when a
+        // single Section is selected, since it's meaningless for the
+        // unfiltered/broad view.
+        $fulfilledOfferings = [];
+
+        if ($sectionId) {
+            $fulfilledOfferings = IrregularSubjectFulfillment::where('section_id', $sectionId)
+                ->whereHas('subjectOffering', fn ($q) => $q->when(
+                    $academicTermId,
+                    fn ($q) => $q->where('academic_term_id', $academicTermId)
+                ))
+                ->with([
+                    'subjectOffering.subject:id,subject_code,descriptive_title',
+                    'subjectOffering.program:id,code',
+                    'subjectOffering.section:id,section_code',
+                ])
+                ->get()
+                ->map(fn (IrregularSubjectFulfillment $fulfillment) => [
+                    'id' => $fulfillment->id,
+                    'edp_code' => $fulfillment->subjectOffering?->edp_code,
+                    'program' => $fulfillment->subjectOffering?->program,
+                    'year_level' => $fulfillment->subjectOffering?->year_level,
+                    'subject' => $fulfillment->subjectOffering?->subject,
+                    'units' => $fulfillment->subjectOffering?->units,
+                    'reused_from_section' => $fulfillment->subjectOffering?->section?->section_code,
+                ])
+                ->values();
+        }
+
         return Inertia::render('SubjectOfferings/Index', [
 
             'offerings' => $offerings,
+
+            'fulfilledOfferings' => $fulfilledOfferings,
 
             'academicTerms' => AcademicTerm::orderByDesc('academic_year')->orderBy('semester')->get(),
 
@@ -1143,6 +1182,12 @@ class SubjectOfferingController extends Controller implements HasMiddleware
      * room commitment only ever happens in Master Grid, where the
      * Greedy Scheduler checks real conflicts. Passing a null room_id
      * clears the preference.
+     *
+     * Enforces the same RoomCapacityService weekly-hours check
+     * syncPreferredSubjects() does, evaluated against the room's
+     * resulting full preferred set for the term (see below) — a
+     * single-offering update reaching the same cap Manage Subjects
+     * already enforces from the other direction.
      */
     public function setPreferredRoom(Request $request, SubjectOffering $subjectOffering): JsonResponse
     {
@@ -1179,6 +1224,25 @@ class SubjectOfferingController extends Controller implements HasMiddleware
                 return response()->json([
                     'message' => "{$room->room_code} is a {$room->room_type} room — {$subjectOffering->edp_code} requires {$subjectOffering->room_type}.",
                 ], 422);
+            }
+
+            // Same weekly-capacity rule Room::syncPreferredSubjects()
+            // enforces from the other direction — checked against the
+            // room's resulting FULL preferred set for this term (every
+            // offering it already prefers, plus this one), not just
+            // this single offering, since RoomCapacityService evaluates
+            // total weekly hours across the whole set.
+            $resultingIds = $room->preferredSubjectOfferings()
+                ->where('academic_term_id', $subjectOffering->academic_term_id)
+                ->pluck('subject_offerings.id')
+                ->push($subjectOffering->id)
+                ->unique()
+                ->values();
+
+            $capacityCheck = $this->capacity->checkCapacity($room, $subjectOffering->academicTerm, $resultingIds);
+
+            if ($capacityCheck['exceeds']) {
+                return response()->json(['message' => $capacityCheck['message']], 422);
             }
         }
 

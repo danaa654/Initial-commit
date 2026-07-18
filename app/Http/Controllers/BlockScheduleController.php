@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Department;
 use App\Models\Faculty;
+use App\Models\IrregularSubjectFulfillment;
 use App\Models\Section;
 use App\Models\SubjectOffering;
 use App\Models\TeachingAssignment;
@@ -270,7 +271,7 @@ class BlockScheduleController extends Controller implements HasMiddleware
         $offerings = $term
             ? SubjectOffering::with([
                     'subject:id,subject_code,descriptive_title',
-                    'section:id,section_code,section_name,year_level',
+                    'section:id,section_code,section_name,year_level,is_irregular',
                     'teachingAssignment.faculty:id,first_name,last_name',
                     'teachingAssignment.schedules.room:id,room_code,building',
                 ])
@@ -282,6 +283,31 @@ class BlockScheduleController extends Controller implements HasMiddleware
                 ->get()
             : collect();
 
+        // Same reasoning as show() below: an Irregular Section's
+        // reused Subjects (via IrregularSubjectFulfillment) live under
+        // a different Section's section_id in subject_offerings, so
+        // they need to be fetched and credited back to the Irregular
+        // Section separately, keyed by fulfillment->section_id rather
+        // than the Regular Section that actually owns the row.
+        $fulfillmentsBySection = collect();
+
+        if ($term) {
+            $fulfillmentsBySection = IrregularSubjectFulfillment::whereHas(
+                    'section.curriculum.program',
+                    fn ($q) => $q->where('department_id', $department->id)
+                )
+                ->whereHas('subjectOffering', fn ($q) => $q->where('academic_term_id', $term->id))
+                ->with([
+                    'section:id,section_code,year_level,is_irregular',
+                    'subjectOffering.subject:id,subject_code,descriptive_title',
+                    'subjectOffering.teachingAssignment.faculty:id,first_name,last_name',
+                    'subjectOffering.teachingAssignment.schedules.room:id,room_code,building',
+                    'subjectOffering.section:id,section_code',
+                ])
+                ->get()
+                ->groupBy('section_id');
+        }
+
         // Grouped by Block so the printout reads "BSIT-1A" as its own
         // header with its Subjects listed underneath, one table per
         // Block, rather than one long flat table repeating the Block
@@ -289,30 +315,91 @@ class BlockScheduleController extends Controller implements HasMiddleware
         // SubjectOfferingController::print()'s Section grouping.
         $blocks = $offerings
             ->groupBy('section_id')
-            ->map(function ($group) {
+            ->map(function ($group) use (&$fulfillmentsBySection) {
                 $first = $group->first();
                 $section = $first->section;
+
+                $ownRows = $group
+                    ->sortBy('edp_code')
+                    ->values()
+                    ->map(function (SubjectOffering $offering) {
+                        $summary = $this->summarizeSchedule($offering->teachingAssignment?->schedules ?? []);
+
+                        return [
+                            'edp_code' => $offering->edp_code,
+                            'subject_code' => $offering->subject?->subject_code,
+                            'descriptive_title' => $offering->subject?->descriptive_title,
+                            'units' => $offering->units,
+                            'faculty_name' => $offering->teachingAssignment?->faculty?->full_name,
+                            'reused_from_section' => null,
+                            ...$summary,
+                        ];
+                    });
+
+                $reusedRows = ($fulfillmentsBySection->get($section?->id) ?? collect())
+                    ->map(function (IrregularSubjectFulfillment $fulfillment) {
+                        $offering = $fulfillment->subjectOffering;
+                        $summary = $this->summarizeSchedule($offering?->teachingAssignment?->schedules ?? []);
+
+                        return [
+                            'edp_code' => $offering?->edp_code,
+                            'subject_code' => $offering?->subject?->subject_code,
+                            'descriptive_title' => $offering?->subject?->descriptive_title,
+                            'units' => $offering?->units,
+                            'faculty_name' => $offering?->teachingAssignment?->faculty?->full_name,
+                            'reused_from_section' => $offering?->section?->section_code,
+                            ...$summary,
+                        ];
+                    });
+
+                // Once matched here, remove from the leftover map below
+                // so a Section with SOME of its own offerings doesn't
+                // also get double-added by the leftover pass.
+                $fulfillmentsBySection->forget($section?->id);
 
                 return [
                     'section_code' => $section?->section_code ?? 'Unassigned Block',
                     'year_level' => $section?->year_level,
-                    'offerings' => $group
-                        ->sortBy('edp_code')
-                        ->values()
-                        ->map(function (SubjectOffering $offering) {
-                            $summary = $this->summarizeSchedule($offering->teachingAssignment?->schedules ?? []);
-
-                            return [
-                                'edp_code' => $offering->edp_code,
-                                'subject_code' => $offering->subject?->subject_code,
-                                'descriptive_title' => $offering->subject?->descriptive_title,
-                                'units' => $offering->units,
-                                'faculty_name' => $offering->teachingAssignment?->faculty?->full_name,
-                                ...$summary,
-                            ];
-                        }),
+                    'is_irregular' => (bool) $section?->is_irregular,
+                    'offerings' => $ownRows->concat($reusedRows)->sortBy('edp_code')->values(),
                 ];
-            })
+            });
+
+        // Irregular Sections whose Subjects were ENTIRELY covered by
+        // reuse never appear in $offerings at all (no Subject Offering
+        // of their own exists to group by), so they'd silently vanish
+        // from the printout without this — one block per Section still
+        // left in the map after the pass above.
+        $leftoverBlocks = $fulfillmentsBySection->map(function ($fulfillments, $sectionId) {
+            $section = $fulfillments->first()->section;
+
+            return [
+                'section_code' => $section?->section_code ?? 'Unassigned Block',
+                'year_level' => $section?->year_level,
+                'is_irregular' => (bool) $section?->is_irregular,
+                'offerings' => $fulfillments
+                    ->map(function (IrregularSubjectFulfillment $fulfillment) {
+                        $offering = $fulfillment->subjectOffering;
+                        $summary = $this->summarizeSchedule($offering?->teachingAssignment?->schedules ?? []);
+
+                        return [
+                            'edp_code' => $offering?->edp_code,
+                            'subject_code' => $offering?->subject?->subject_code,
+                            'descriptive_title' => $offering?->subject?->descriptive_title,
+                            'units' => $offering?->units,
+                            'faculty_name' => $offering?->teachingAssignment?->faculty?->full_name,
+                            'reused_from_section' => $offering?->section?->section_code,
+                            ...$summary,
+                        ];
+                    })
+                    ->sortBy('edp_code')
+                    ->values(),
+            ];
+        })->values();
+
+        $blocks = $blocks
+            ->values()
+            ->concat($leftoverBlocks)
             ->sortBy(['year_level', 'section_code'])
             ->values();
 
@@ -358,16 +445,55 @@ class BlockScheduleController extends Controller implements HasMiddleware
                         'descriptive_title' => $offering->subject?->descriptive_title,
                         'units' => $offering->units,
                         'faculty_name' => $offering->teachingAssignment?->faculty?->full_name,
+                        'reused_from_section' => null,
                         ...$summary,
                     ];
                 })
-                ->sortBy('edp_code')
-                ->values()
             : collect();
+
+        // Irregular Sections can also cover a Subject by reusing an
+        // existing Regular Section's Subject Offering instead of
+        // getting one of their own (see
+        // SubjectOfferingController::storeIrregular()) — those never
+        // show up in the query above since their section_id still
+        // points at the Regular Section that actually owns them. This
+        // Section's printed schedule needs to show them anyway (the
+        // students really are in that class), just clearly marked with
+        // which Section's schedule they're actually following.
+        if ($term && $section->is_irregular) {
+            $fulfilled = IrregularSubjectFulfillment::where('section_id', $section->id)
+                ->whereHas('subjectOffering', fn ($q) => $q->where('academic_term_id', $term->id))
+                ->with([
+                    'subjectOffering.subject:id,subject_code,descriptive_title',
+                    'subjectOffering.teachingAssignment.faculty:id,first_name,last_name',
+                    'subjectOffering.teachingAssignment.schedules.room:id,room_code,building',
+                    'subjectOffering.section:id,section_code',
+                ])
+                ->get()
+                ->map(function (IrregularSubjectFulfillment $fulfillment) {
+                    $offering = $fulfillment->subjectOffering;
+                    $summary = $this->summarizeSchedule($offering?->teachingAssignment?->schedules ?? []);
+
+                    return [
+                        'id' => $offering?->id,
+                        'edp_code' => $offering?->edp_code,
+                        'subject_code' => $offering?->subject?->subject_code,
+                        'descriptive_title' => $offering?->subject?->descriptive_title,
+                        'units' => $offering?->units,
+                        'faculty_name' => $offering?->teachingAssignment?->faculty?->full_name,
+                        'reused_from_section' => $offering?->section?->section_code,
+                        ...$summary,
+                    ];
+                });
+
+            $offerings = $offerings->concat($fulfilled);
+        }
+
+        $offerings = $offerings->sortBy('edp_code')->values();
 
         return Inertia::render('BlockSchedule/Show', [
             'department' => $department->only(['id', 'code', 'name']),
-            'section' => $section->only(['id', 'section_code', 'section_name', 'year_level']),
+            'section' => $section->only(['id', 'section_code', 'section_name', 'year_level', 'is_irregular']),
             'offerings' => $offerings,
             'academicTerm' => $term,
         ]);

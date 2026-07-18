@@ -82,6 +82,7 @@ class ScheduleValidationService
             'faculty_name' => null,
             'room_id' => null,
             'room_code' => null,
+            'room_override' => false,
             'day' => null,
             'start_minutes' => null,
             'end_minutes' => null,
@@ -150,12 +151,19 @@ class ScheduleValidationService
 
         if ($room) {
             if (! empty($block['room_type']) && $room->room_type !== $block['room_type']) {
-                $conflicts[] = $this->conflict(
-                    self::TYPE_ROOM_TYPE,
-                    $block,
-                    null,
-                    "{$room->room_code} is a {$room->room_type} room, but this subject requires {$block['room_type']}."
-                );
+                $reason = "{$room->room_code} is a {$room->room_type} room, but this subject requires {$block['room_type']}.";
+
+                // Same Room Eligibility Override as the Allowed
+                // Programs check just below — an explicit, per-edit
+                // opt-in (EditScheduleModal's "Override Eligibility"
+                // checkbox on the Room field), downgraded to a warning
+                // rather than skipped outright so the exception stays
+                // visible on the block instead of silently vanishing.
+                if ($block['room_override']) {
+                    $warnings[] = $this->conflict(self::TYPE_ROOM_TYPE, $block, null, "{$reason} Allowed via Override Eligibility.");
+                } else {
+                    $conflicts[] = $this->conflict(self::TYPE_ROOM_TYPE, $block, null, $reason);
+                }
             }
 
             // A room's Allowed Programs (room_group_room — see
@@ -174,12 +182,34 @@ class ScheduleValidationService
                 if (! $allowed) {
                     $reservedFor = $allowedCodes ? implode(', ', $allowedCodes) : 'a different program';
 
-                    $conflicts[] = $this->conflict(
-                        self::TYPE_ROOM_PROGRAM,
-                        $block,
-                        null,
-                        "{$room->room_code} is not allowed for {$block['program_code']} — it's reserved for {$reservedFor}."
-                    );
+                    // Room Eligibility Override (EditScheduleModal's
+                    // "Override Eligibility" checkbox on the Room
+                    // field) is an explicit, per-edit opt-in for a
+                    // legitimate cross-college room share — e.g. an
+                    // SHTM HM/TM section running a subject like ITE in
+                    // one of CCS's computer labs. Rather than block it
+                    // as a conflict the way an unapproved choice would
+                    // be, an overridden pick is downgraded to a
+                    // warning: still visible on the block (and still
+                    // recorded, unlike Faculty's override which has no
+                    // server-side signal at all — see EditScheduleModal's
+                    // docblock), but no longer something Apply/Save
+                    // treats as a reason to refuse the block.
+                    if ($block['room_override']) {
+                        $warnings[] = $this->conflict(
+                            self::TYPE_ROOM_PROGRAM,
+                            $block,
+                            null,
+                            "{$room->room_code} is not normally allowed for {$block['program_code']} (reserved for {$reservedFor}) — allowed via Override Eligibility."
+                        );
+                    } else {
+                        $conflicts[] = $this->conflict(
+                            self::TYPE_ROOM_PROGRAM,
+                            $block,
+                            null,
+                            "{$room->room_code} is not allowed for {$block['program_code']} — it's reserved for {$reservedFor}."
+                        );
+                    }
                 }
             }
         }

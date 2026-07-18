@@ -525,26 +525,35 @@ Route::middleware(['auth'])->group(function () {
         | Department + Program + [Specialization] + Year Level +
         | Section and returns a draft schedule as JSON. It does NOT
         | write to the database — see GreedyScheduleService's docblock.
-        | Restricted to Admin/Registrar only, unlike index() above,
-        | per spec ("When the Registrar or Admin clicks Generate
-        | Schedule..."). MasterGridController::middleware() also
-        | double-checks this same restriction on the controller side,
-        | so a direct hit still 403s even if this route grouping is
-        | ever rearranged later.
+        | Open to Admin/Registrar/Dean/Assistant Dean/OIC per updated
+        | spec (Dean/OIC/Assistant Dean can now generate and
+        | drag-and-drop too, not just view) — department scope for
+        | Dean/OIC is enforced inside MasterGridController via
+        | assertDepartmentInScope(), not at this route-middleware
+        | layer, since scope depends on WHICH department a given
+        | request touches. MasterGridController::middleware() also
+        | double-checks this same role list on the controller side, so
+        | a direct hit still 403s even if this route grouping is ever
+        | rearranged later.
         |
         */
 
+        // Faculty Load Overload — review queue. Stays Admin/Registrar
+        // only — separate from the Master Grid group below, which now
+        // also admits Dean/Assistant Dean/OIC. A Dean/Assistant
+        // Dean/OIC hitting these directly still 403s here, even
+        // though they can reach faculty-load-overloads.store above.
         Route::middleware('role:Admin|Registrar')->group(function () {
 
-            // Faculty Load Overload — review queue. A Dean/Assistant
-            // Dean/OIC hitting these directly still 403s here, even
-            // though they can reach faculty-load-overloads.store above.
             Route::post('faculty-load-overloads/{facultyLoadOverload}/approve', [FacultyLoadOverloadController::class, 'approve'])
                 ->name('faculty-load-overloads.approve');
 
             Route::post('faculty-load-overloads/{facultyLoadOverload}/decline', [FacultyLoadOverloadController::class, 'decline'])
                 ->name('faculty-load-overloads.decline');
 
+        });
+
+        Route::middleware('role:Admin|Registrar|Dean|Assistant Dean|OIC')->group(function () {
             // Generate Schedule — Step 2 (Session Settings). GET fetches
             // the section's Subject Offerings + eligible faculty/rooms
             // for the editing table; PUT persists meetings/week and any

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { router } from '@inertiajs/vue3'
 import axios from 'axios'
-import { MagnifyingGlassIcon, PlusIcon, ClipboardDocumentListIcon } from '@heroicons/vue/24/outline'
+import { MagnifyingGlassIcon, PlusIcon, ClipboardDocumentListIcon, ClockIcon } from '@heroicons/vue/24/outline'
 
 const props = defineProps({
     section: { type: Object, required: true },
@@ -114,6 +114,13 @@ function toggleForceNew(curriculumItemId) {
         forceNew.value.delete(curriculumItemId)
     } else {
         forceNew.value.add(curriculumItemId)
+
+        // Choosing "make this Independent" is a clear signal the user
+        // wants this Subject attached — without this, the checkbox
+        // stayed unchecked, "0 selected" never moved, and Attach
+        // Selected Subjects silently ignored the choice.
+        selected.value.add(curriculumItemId)
+        selected.value = new Set(selected.value)
     }
 
     forceNew.value = new Set(forceNew.value)
@@ -295,9 +302,9 @@ function attachSelected() {
 
                                     <button
                                         type="button"
-                                        :title="'Open a brand-new/additional class for ' + subject.subject_code + ' instead of placing this Section\'s students into ' + subject.existing_offering.section_code + ' — use this when the irregular students need a different time slot, faculty, or room than the existing class.'"
+                                        :title="'Give ' + subject.subject_code + ' its own class — separate time slot, faculty, and room — instead of placing this Section\'s students into ' + subject.existing_offering.section_code + '.'"
                                         @click.stop.prevent="toggleForceNew(subject.curriculum_item_id)"
-                                        class="inline-flex items-center gap-1.5 rounded-full border-2 px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer"
+                                        class="inline-flex items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer"
                                         :class="forceNew.has(subject.curriculum_item_id)
                                             ? 'border-amber-500 bg-amber-500/20 text-amber-700 dark:text-amber-300'
                                             : 'border-[var(--text-muted)]/40 text-[var(--text-secondary)] hover:border-amber-500 hover:bg-amber-500/10'"
@@ -316,8 +323,9 @@ function attachSelected() {
                                             >
                                                 <path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 111.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clip-rule="evenodd" />
                                             </svg>
+                                            <ClockIcon v-else class="h-2.5 w-2.5" />
                                         </span>
-                                        Open new/additional section instead
+                                        {{ forceNew.has(subject.curriculum_item_id) ? 'Independent — own time, faculty, room' : 'Make independent instead' }}
                                     </button>
                                 </div>
                                 <p v-if="subject.existing_offering && forceNew.has(subject.curriculum_item_id)" class="mt-1 text-[10px] text-amber-600 dark:text-amber-400">

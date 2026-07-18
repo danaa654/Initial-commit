@@ -150,7 +150,8 @@ function clampCapacity() {
         return
     }
 
-    form.capacity = Math.min(45, Math.max(20, value))
+    const min = form.is_irregular ? 1 : 20
+    form.capacity = Math.min(45, Math.max(min, value))
 }
 
 function submit() {
@@ -161,33 +162,21 @@ function submit() {
     form.post(route('sections.store'))
 }
 
-// Whether every field submit() actually needs is already filled in —
-// used to decide whether flipping the Irregular toggle can save right
-// away, versus just recording the intent and waiting for the user to
-// finish the rest of the form.
-const readyToSave = computed(() =>
-    scopeReady.value
-    && !!form.section_letter
-    && !scopeFull.value
-    && !!form.section_name
-    && !!form.capacity
-)
-
-// Flipping Irregular ON is the moment the user wants to see the Subject
-// picker — but that picker needs a real Section id (see
-// IrregularSubjectPicker.vue), which only exists once this record is
-// saved. So instead of making them flip the toggle, then separately
-// click Save Section, then navigate to Edit, we just do that save for
-// them right here and let the backend redirect to Edit (where the
-// picker renders immediately). If the rest of the form isn't filled in
-// yet, we fall back to just toggling the field — Save Section will
-// still land on Edit once they do finish it, thanks to the same
-// backend redirect.
+// Flipping Irregular ON used to auto-save the section right away (so
+// the Subject picker, which needs a real Section id, could render
+// immediately). Per updated behavior, the toggle should only ever
+// change local form state — saving is now only ever triggered by the
+// user explicitly clicking Save Section.
 function toggleIrregular() {
     form.is_irregular = !form.is_irregular
 
-    if (form.is_irregular && readyToSave.value && !form.processing) {
-        form.post(route('sections.store'))
+    // Irregular sections are hand-picked, small groups — 5 is a sane
+    // starting point, not a min or max, just what the field defaults
+    // to so staff don't have to think about it right away.
+    if (form.is_irregular) {
+        form.capacity = 5
+    } else if (Number(form.capacity) < 20) {
+        form.capacity = 20
     }
 }
 </script>
@@ -397,13 +386,15 @@ function toggleIrregular() {
                             v-model="form.capacity"
                             @blur="clampCapacity"
                             type="number"
-                            min="20"
+                            :min="form.is_irregular ? 1 : 20"
                             max="45"
                             class="w-full rounded-xl border border-[var(--card-border)] bg-[var(--page-bg)] px-3 py-2.5 text-sm text-[var(--text-primary)] transition-all duration-200 focus:border-[#D4A62A] focus:outline-none focus:ring-2 focus:ring-[#D4A62A]/30"
                         >
 
                         <p class="text-[var(--text-muted)] text-sm mt-1">
-                            Must be between 20 and 45 students.
+                            {{ form.is_irregular
+                                ? 'Irregular sections default to 5 — adjust as needed (1–45).'
+                                : 'Must be between 20 and 45 students.' }}
                         </p>
 
                         <p v-if="form.errors.capacity" class="text-red-500 text-sm mt-1">
@@ -437,15 +428,8 @@ function toggleIrregular() {
                             <p class="text-xs text-[var(--text-muted)] mt-1 max-w-sm">
                                 Skips automatic Subject Offering generation from the
                                 curriculum/year level. Subjects are hand-picked instead.
-                                <template v-if="readyToSave">
-                                    Turning this on saves the section right away and
-                                    takes you to the Subject picker.
-                                </template>
-                                <template v-else>
-                                    Fill in the fields above first — once you do,
-                                    turning this on will save and take you straight
-                                    to the Subject picker.
-                                </template>
+                                Click Save Section to apply this and unlock the Subject
+                                picker.
                             </p>
                         </div>
 

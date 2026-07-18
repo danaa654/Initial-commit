@@ -160,7 +160,21 @@ function clampCapacity() {
         return
     }
 
-    form.capacity = Math.min(45, Math.max(20, value))
+    const min = form.is_irregular ? 1 : 20
+    form.capacity = Math.min(45, Math.max(min, value))
+}
+
+function toggleIrregular() {
+    form.is_irregular = !form.is_irregular
+
+    // Irregular sections are hand-picked, small groups — 5 is a sane
+    // starting point, not a min or max, just what the field defaults
+    // to so staff don't have to think about it right away.
+    if (form.is_irregular) {
+        form.capacity = 5
+    } else if (Number(form.capacity) < 20) {
+        form.capacity = 20
+    }
 }
 
 function submit() {
@@ -397,13 +411,15 @@ function submit() {
                             v-model="form.capacity"
                             @blur="clampCapacity"
                             type="number"
-                            min="20"
+                            :min="form.is_irregular ? 1 : 20"
                             max="45"
                             class="w-full rounded-xl border border-[var(--card-border)] bg-[var(--page-bg)] px-3 py-2.5 text-sm text-[var(--text-primary)] transition-all duration-200 focus:border-[#D4A62A] focus:outline-none focus:ring-2 focus:ring-[#D4A62A]/30"
                         >
 
                         <p class="text-[var(--text-muted)] text-sm mt-1">
-                            Must be between 20 and 45 students.
+                            {{ form.is_irregular
+                                ? 'Irregular sections default to 5 — adjust as needed (1–45).'
+                                : 'Must be between 20 and 45 students.' }}
                         </p>
 
                         <p v-if="form.errors.capacity" class="text-red-500 text-sm mt-1">
@@ -446,7 +462,7 @@ function submit() {
                             type="button"
                             role="switch"
                             :aria-checked="form.is_irregular"
-                            @click="form.is_irregular = !form.is_irregular"
+                            @click="toggleIrregular"
                             :class="[
                                 'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200',
                                 form.is_irregular ? 'bg-[#D4A62A]' : 'bg-[var(--card-border)]',

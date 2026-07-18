@@ -86,11 +86,15 @@ class MasterGridController extends Controller implements HasMiddleware
 
             }),
 
-            // Generate / Validate / Save all require the same
-            // Admin/Registrar-only restriction — reviewing and
-            // committing a schedule is the same privileged action the
-            // spec restricts to "When the Registrar or Admin clicks
-            // Generate Schedule...".
+            // Generate / Validate / Save now open to Dean/Assistant
+            // Dean/OIC per updated spec — they can drag-and-drop and
+            // auto-generate for the Active Term, same as Admin/
+            // Registrar can for the Planning Term (see
+            // SchedulingWorkspaceService::getTermForUser()). Unlike
+            // Admin/Registrar, Dean/OIC are department-scoped —
+            // enforced per-action below via assertDepartmentInScope(),
+            // not here, since scope is a property of WHICH department
+            // a given request touches, not a blanket route rule.
             new Middleware(function ($request, $next) {
 
                 if ($request->routeIs(
@@ -102,9 +106,9 @@ class MasterGridController extends Controller implements HasMiddleware
                     'master-grid.session-settings.update'
                 )) {
                     abort_unless(
-                        auth()->user()->hasAnyRole(['Admin', 'Registrar']),
+                        auth()->user()->hasAnyRole(['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC']),
                         403,
-                        'Only Admin or Registrar can generate or save a schedule.'
+                        'You do not have permission to generate or save a schedule.'
                     );
                 }
 
@@ -130,19 +134,18 @@ class MasterGridController extends Controller implements HasMiddleware
 
                 // Drives every editing affordance client-side (the
                 // Generate Schedule button, and whether clicking a
-                // block opens it read-only or editable) — Dean/
-                // Assistant Dean/OIC may view the grid and open a
-                // block's details, but only Admin/Registrar can
-                // actually change anything, matching the same
-                // Admin/Registrar-only restriction already enforced
-                // server-side in middleware() above for generate/
-                // validate-block/save/session-settings. This is
-                // purely a UI convenience — the real enforcement
-                // stays in middleware(), so even if this flag were
-                // ever wrong, no write endpoint would open up because
-                // of it.
+                // block opens it read-only or editable). Dean/
+                // Assistant Dean/OIC can now generate/drag-and-drop/
+                // save too — same 5 roles the base middleware() above
+                // already lets onto this page at all — with
+                // department scope enforced per-action server-side via
+                // assertDepartmentInScope(), not here. This is purely a
+                // UI convenience — the real enforcement stays in
+                // middleware()/assertDepartmentInScope(), so even if
+                // this flag were ever wrong, no write endpoint would
+                // open up because of it.
                 'can' => [
-                    'manage' => auth()->user()->hasAnyRole(['Admin', 'Registrar']),
+                    'manage' => auth()->user()->hasAnyRole(['Admin', 'Registrar', 'Dean', 'Assistant Dean', 'OIC']),
                 ],
             ]
         );
@@ -169,6 +172,28 @@ class MasterGridController extends Controller implements HasMiddleware
     }
 
     /**
+     * The actual enforcement behind managerDepartmentId() now that
+     * Dean/OIC can WRITE here (generate/save/remove-schedule/session
+     * settings), not just view. A null $departmentId (General
+     * Education — see MasterGridDataService's "own department + Gen Ed"
+     * rule) is always allowed regardless of scope, since there's no
+     * single department that owns it and nothing here can be
+     * Gen-Ed-only anyway (a Section's own department drives the Gen Ed
+     * inclusion, not the reverse). Admin/Registrar/Assistant Dean pass
+     * automatically since managerDepartmentId() returns null for them.
+     */
+    private function assertDepartmentInScope(?int $departmentId): void
+    {
+        $scope = $this->managerDepartmentId(auth()->user());
+
+        abort_unless(
+            $scope === null || $departmentId === null || $departmentId === $scope,
+            403,
+            'You do not have permission to manage scheduling for this department.'
+        );
+    }
+
+    /**
      * Step 2 of Generate Schedule — "Session Settings". Given the
      * Target Selection from Step 1, returns every Subject Offering
      * still needing to be scheduled for that section, along with
@@ -189,6 +214,8 @@ class MasterGridController extends Controller implements HasMiddleware
         $planningTerm = $this->workspace->getTermForUser(auth()->user());
 
         abort_unless($planningTerm, 422, 'No Planning Academic Term is set — configure one in Settings > Scheduling Workspace before generating a schedule.');
+
+        $this->assertDepartmentInScope($validated['department_id']);
 
         $result = $this->sessionSettings->build($planningTerm, $validated);
 
@@ -228,6 +255,13 @@ class MasterGridController extends Controller implements HasMiddleware
 
         $this->workspace->assertWritable($planningTerm);
 
+        SubjectOffering::whereIn('id', collect($validated['subjects'])->pluck('subject_offering_id'))
+            ->with('program')
+            ->get()
+            ->pluck('program.department_id')
+            ->unique()
+            ->each(fn ($departmentId) => $this->assertDepartmentInScope($departmentId));
+
         $this->sessionSettings->save($validated['subjects']);
 
         return response()->json(['message' => 'Session settings saved.']);
@@ -251,6 +285,8 @@ class MasterGridController extends Controller implements HasMiddleware
         $planningTerm = $this->workspace->getTermForUser(auth()->user());
 
         abort_unless($planningTerm, 422, 'No Planning Academic Term is set — configure one in Settings > Scheduling Workspace before generating a schedule.');
+
+        $this->assertDepartmentInScope($validated['department_id']);
 
         // Generate produces an in-memory preview only (nothing is
         // persisted here), but blocking it up front — rather than only
@@ -292,6 +328,14 @@ class MasterGridController extends Controller implements HasMiddleware
         $planningTerm = $this->workspace->getTermForUser(auth()->user());
 
         abort_unless($planningTerm, 422, 'No Planning Academic Term is set. Configure one in Settings > Scheduling Workspace.');
+
+        if (! empty($validated['block']['subject_offering_id'])) {
+            $departmentId = SubjectOffering::with('program')
+                ->find($validated['block']['subject_offering_id'])
+                ?->program?->department_id;
+
+            $this->assertDepartmentInScope($departmentId);
+        }
 
         $allBlocks = collect($validated['blocks']);
         $block = $validated['block'];
@@ -378,9 +422,14 @@ class MasterGridController extends Controller implements HasMiddleware
             ->with('program')
             ->get()
             ->pluck('program.department_id')
-            ->filter()
             ->unique()
-            ->each(fn ($departmentId) => \App\Services\TermFinalizationService::abortIfDepartmentFinalized($departmentId, $planningTerm->id));
+            ->each(function ($departmentId) use ($planningTerm) {
+                $this->assertDepartmentInScope($departmentId);
+
+                if ($departmentId) {
+                    \App\Services\TermFinalizationService::abortIfDepartmentFinalized($departmentId, $planningTerm->id);
+                }
+            });
 
         $conflictsByOffering = $this->validator->validateAll($blocks, $planningTerm);
 
@@ -519,6 +568,8 @@ class MasterGridController extends Controller implements HasMiddleware
 
         $offering = \App\Models\SubjectOffering::with('program')
             ->find($validated['subject_offering_id']);
+
+        $this->assertDepartmentInScope($offering?->program?->department_id);
 
         if ($offering && $departmentId = $offering->program?->department_id) {
             \App\Services\TermFinalizationService::abortIfDepartmentFinalized($departmentId, $planningTerm->id);

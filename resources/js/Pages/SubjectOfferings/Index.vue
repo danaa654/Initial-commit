@@ -14,6 +14,7 @@ import {
 
 const props = defineProps({
     offerings: Object,
+    fulfilledOfferings: Array,
     academicTerms: Array,
     programs: Array,
     specializations: Array,
@@ -768,7 +769,70 @@ watch(() => props.offerings.data, () => {
 
                         <tr v-if="offerings.data.length === 0">
                             <td :colspan="can.bulkUpdateWeeklyHours ? 13 : 12" class="text-center py-8 text-[var(--text-muted)]">
-                                No Subject Offerings found. Try adjusting your filters.
+                                {{ fulfilledOfferings?.length
+                                    ? 'No Subject Offerings of its own for this Section — see Reused Subjects below.'
+                                    : 'No Subject Offerings found. Try adjusting your filters.' }}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Reused Subjects: these were attached to an Irregular
+                 Section by fulfillment rather than a new Subject
+                 Offering (see storeIrregular()) — no EDP Code of their
+                 own was minted, so they'd otherwise never show up in
+                 the table above when filtered to this Section. -->
+            <div
+                v-if="fulfilledOfferings?.length"
+                class="mt-4 rounded-xl border border-[#D4A62A]/30 bg-[#D4A62A]/5 overflow-hidden"
+            >
+                <div class="px-4 py-3 border-b border-[#D4A62A]/20">
+                    <p class="text-sm font-semibold text-[var(--text-primary)]">
+                        Reused Subjects ({{ fulfilledOfferings.length }})
+                    </p>
+                    <p class="text-xs text-[var(--text-muted)] mt-0.5">
+                        Covered by an existing Regular Section's Subject Offering — no separate EDP Code was created for these.
+                    </p>
+                </div>
+
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-[var(--page-bg)]/60 border-b border-[#D4A62A]/20">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">EDP Code</th>
+                            <th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Program</th>
+                            <th class="px-4 py-2 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Year</th>
+                            <th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Subject</th>
+                            <th class="px-4 py-2 text-center text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Units</th>
+                            <th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Reused From</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr
+                            v-for="fulfillment in fulfilledOfferings"
+                            :key="fulfillment.id"
+                            class="border-t border-[#D4A62A]/10"
+                        >
+                            <td class="px-4 py-2.5 font-mono font-medium text-[var(--text-primary)]">
+                                {{ fulfillment.edp_code }}
+                            </td>
+                            <td class="px-4 py-2.5 text-[var(--text-primary)]">
+                                {{ fulfillment.program?.code }}
+                            </td>
+                            <td class="px-4 py-2.5 text-center text-[var(--text-primary)]">
+                                {{ fulfillment.year_level }}
+                            </td>
+                            <td class="px-4 py-2.5 text-[var(--text-primary)]">
+                                <div class="font-medium">{{ fulfillment.subject?.subject_code }}</div>
+                                <div class="text-xs text-[var(--text-muted)]">{{ fulfillment.subject?.descriptive_title }}</div>
+                            </td>
+                            <td class="px-4 py-2.5 text-center text-[var(--text-primary)]">
+                                {{ fulfillment.units ?? '—' }}
+                            </td>
+                            <td class="px-4 py-2.5 text-[var(--text-primary)]">
+                                <span class="inline-flex items-center rounded-full border border-[#D4A62A]/30 bg-white px-2.5 py-0.5 text-xs font-semibold text-[#D4A62A]">
+                                    {{ fulfillment.reused_from_section }}
+                                </span>
                             </td>
                         </tr>
                     </tbody>

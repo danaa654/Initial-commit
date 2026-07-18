@@ -368,7 +368,15 @@ const gridTemplateColumns = computed(
                     :style="{ gridColumn, gridRow }"
                     @click="editable && emit('edit-block', event)"
                 >
-                    <p class="font-black text-[13px] leading-tight">{{ event.subject_code }} · {{ event.section_code }}</p>
+                    <p class="font-black text-[13px] leading-tight">
+                        {{ event.subject_code }} · {{ event.section_code }}
+                        <span
+                            v-if="event.is_irregular"
+                            class="ml-0.5 px-1 py-0.5 rounded-full text-[8px] font-black uppercase align-middle"
+                            style="background: rgba(212, 166, 42, 0.2); color: #92700f; border: 1px solid rgba(212, 166, 42, 0.4)"
+                            title="Irregular Section"
+                        >Irr</span>
+                    </p>
 
                     <span
                         v-if="event.classification"

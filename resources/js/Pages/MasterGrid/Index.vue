@@ -11,6 +11,7 @@ import GenerateScheduleModal from './Partials/GenerateScheduleModal.vue'
 import SessionSettingsModal from './Partials/SessionSettingsModal.vue'
 import GeneratePreviewModal from './Partials/GeneratePreviewModal.vue'
 import EditScheduleModal from './Partials/EditScheduleModal.vue'
+import { useTimetableGrid } from '@/Composables/useTimetableGrid'
 import { useFlashToast } from '@/Composables/useFlashToast'
 
 defineOptions({
@@ -36,6 +37,12 @@ const props = defineProps({
 })
 
 const canManage = computed(() => !!props.can?.manage)
+
+// Same composable EditScheduleModal itself uses for its Day/Start
+// options — reused here only for handleSubjectCardClick's defaults
+// below, so "click to schedule" starts from a real, valid slot instead
+// of a guessed one.
+const { workingDays, timeRows } = useTimetableGrid(computed(() => props.activeTerm))
 
 /* ── Sidebar collapse state ─────────────────────────────────────── */
 const subjectsCollapsed = ref(false)
@@ -542,8 +549,65 @@ function handleDropSubject({ subjectOfferingId, roomId, day, startMinutes }) {
         `${offering.subject_code} placed on ${room?.room_code ?? 'the grid'} — review and Apply Changes to save.`,
         'success'
     )
+}
 
-    if (canManage.value) {
+/**
+ * Click-to-schedule — SubjectSidebar's alternative to dragging a card
+ * onto the grid. Exists for exactly the case drag-and-drop is awkward
+ * for: the room that's actually needed (say, a CCS lab for an SHTM
+ * section's ITE class) isn't one Room View happens to be showing, or
+ * dragging onto it would just get rejected outright since it isn't
+ * Allowed for this program — Room Eligibility Override on the Edit
+ * Schedule modal is how that gets placed anyway, and Override only
+ * exists inside that modal, not as a drop-time option. So instead of
+ * requiring a drag onto some specific valid cell first, this opens the
+ * same modal with a real (but unconfirmed) Day/Start default and Room
+ * left unset — Apply Changes only enables once every required field,
+ * including Room, is actually filled in.
+ *
+ * Day/Start default to the grid's own first working day and first
+ * non-lunch slot (not just placeholder zeros) so the instant-conflict
+ * check below has something real to check — same reasoning
+ * handleDropSubject's docblock gives for validating immediately rather
+ * than waiting for the first field the person touches.
+ */
+function handleSubjectCardClick(offering) {
+    if (!canManage.value) return
+
+    const defaultDay = workingDays.value[0]?.field ?? null
+    const defaultStart = timeRows.value.find((row) => row.type === 'slot')?.startMinutes ?? null
+
+    const meetings = offering.meetings_per_week || 1
+    const durationMinutes = offering.hours ? Math.round((offering.hours / meetings) * 60) : null
+    const endMinutes = durationMinutes !== null && defaultStart !== null ? defaultStart + durationMinutes : null
+
+    const block = {
+        subject_offering_id: offering.id,
+        academic_term_id: offering.academic_term_id,
+        subject_code: offering.subject_code,
+        descriptive_title: offering.descriptive_title,
+        program_code: offering.program_code,
+        department_id: offering.department_id,
+        year_level: offering.year_level,
+        section_id: offering.section_id,
+        section_code: offering.section_code,
+        units: offering.units,
+        hours: offering.hours,
+        meetings_per_week: meetings,
+        classification: offering.classification,
+        room_type: offering.room_type,
+        faculty_id: offering.faculty_id ?? null,
+        faculty_name: offering.faculty_assigned ?? null,
+        room_id: null,
+        room_code: null,
+        day: defaultDay,
+        start_minutes: defaultStart,
+        end_minutes: endMinutes,
+    }
+
+    openEditModal([block], 'grid', { allowSessionSettings: true })
+
+    if (defaultDay && defaultStart !== null) {
         validateDraft({
             faculty_id: block.faculty_id,
             room_id: block.room_id,
@@ -552,6 +616,11 @@ function handleDropSubject({ subjectOfferingId, roomId, day, startMinutes }) {
             end_minutes: block.end_minutes,
         })
     }
+
+    showToast(
+        `${offering.subject_code} opened for scheduling — set Room (and Faculty, if needed), then Apply Changes to save.`,
+        'success'
+    )
 }
 
 function closeEditModal() {
@@ -602,6 +671,7 @@ async function validateDraft(fields) {
         faculty_id: fields.faculty_id,
         faculty_name: facultyName,
         room_id: fields.room_id,
+        room_override: fields.room_override,
         day: day ?? editingGroup.value[i]?.day,
         start_minutes: fields.start_minutes,
         end_minutes: fields.end_minutes,
@@ -799,6 +869,7 @@ async function applyEdit(fields) {
         faculty_name: facultyName,
         room_id: fields.room_id,
         room_code: roomCode,
+        room_override: fields.room_override,
         day: days[i],
         start_minutes: fields.start_minutes,
         end_minutes: fields.end_minutes,
@@ -1064,6 +1135,7 @@ const hasActiveTerm = computed(() => !!props.activeTerm)
                     :can-manage="canManage"
                     @drag-start="draggedOffering = $event"
                     @drag-end="draggedOffering = null"
+                    @card-click="handleSubjectCardClick"
                 />
 
                 <RoomSidebar

@@ -22,7 +22,7 @@ const props = defineProps({
     canManage: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:collapsed', 'drag-start', 'drag-end'])
+const emit = defineEmits(['update:collapsed', 'drag-start', 'drag-end', 'card-click'])
 
 function toggle() {
     emit('update:collapsed', !props.collapsed)
@@ -118,6 +118,24 @@ function onDragStart(event, offering) {
 function onDragEnd() {
     emit('drag-end')
 }
+
+/**
+ * Click-to-schedule — an alternative to drag-and-drop for placing an
+ * unscheduled offering, useful when the "right" room isn't one drag
+ * would naturally land on anyway (e.g. it needs Room Eligibility
+ * Override — see EditScheduleModal — because the actual target room
+ * isn't Allowed for this program/type, so dragging onto that exact
+ * cell either isn't obvious or gets rejected outright). Opens the same
+ * Edit Schedule modal a drop would, just with Room/Day/Start left for
+ * the person to fill in themselves rather than pre-set by wherever
+ * they dropped it. Same guard as dragstart — no-op for an
+ * already-scheduled card or when the viewer can't manage the grid.
+ */
+function onCardClick(offering) {
+    if (!props.canManage || offering.is_scheduled) return
+
+    emit('card-click', offering)
+}
 </script>
 
 <template>
@@ -211,13 +229,23 @@ function onDragEnd() {
                     '--subject-accent': accentColor(offering.college_code),
                 }"
                 :draggable="canManage && !offering.is_scheduled"
+                :title="canManage && !offering.is_scheduled ? 'Drag onto the grid, or click to open Edit Schedule and place it manually.' : null"
                 @dragstart="onDragStart($event, offering)"
                 @dragend="onDragEnd"
+                @click="onCardClick(offering)"
             >
                 <div class="flex items-center justify-between gap-2">
                     <p class="font-black text-[12px]" style="color: var(--text-primary)">
                         {{ offering.subject_code }}
                         <span class="font-bold" style="color: var(--text-muted)">· {{ offering.section_code }}</span>
+                        <span
+                            v-if="offering.is_irregular"
+                            class="ml-1 inline-flex items-center px-1 py-0.5 rounded-full text-[8px] font-black uppercase"
+                            style="background: rgba(212, 166, 42, 0.15); color: #D4A62A; border: 1px solid rgba(212, 166, 42, 0.3)"
+                            title="Irregular Section"
+                        >
+                            Irr
+                        </span>
                     </p>
                     <span
                         v-if="offering.is_scheduled"

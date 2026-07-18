@@ -168,7 +168,18 @@ class MasterGridDataService
                 ->map(fn (Room $room) => $this->presentRoom($room, $activeTerm, $programDepartmentMap, $schedulesByRoom))
                 ->values(),
 
-            'departments' => Department::where('active', true)->orderBy('name')->get(['id', 'name', 'abbreviation']),
+            // Scoped the same way offeringsForTerm() above already is:
+            // Dean/OIC only ever see their own department here (they
+            // can now actually Generate/drag-and-drop, not just view —
+            // showing every college in this dropdown when 3 of them
+            // are off-limits would just be a 403 waiting to happen
+            // after they pick one). Admin/Registrar/Assistant Dean
+            // pass $departmentId === null and see every department, as
+            // before.
+            'departments' => Department::where('active', true)
+                ->when($departmentId, fn ($q) => $q->where('id', $departmentId))
+                ->orderBy('name')
+                ->get(['id', 'name', 'abbreviation']),
 
             'programs' => Program::with('department')
                 ->where('active', true)
@@ -214,6 +225,7 @@ class MasterGridDataService
                         'descriptive_title' => $s->subjectOffering?->subject?->descriptive_title,
                         'section_code' => $s->subjectOffering?->section?->section_code,
                         'section_id' => $s->subjectOffering?->section_id,
+                        'is_irregular' => (bool) $s->subjectOffering?->section?->is_irregular,
                         'year_level' => $s->subjectOffering?->year_level,
                         'program_code' => $s->subjectOffering?->program?->code,
                         'units' => $s->subjectOffering?->units,
@@ -353,6 +365,7 @@ class MasterGridDataService
             'year_level' => $offering->year_level,
             'section_id' => $offering->section_id,
             'section_code' => $offering->section?->section_code,
+            'is_irregular' => (bool) $offering->section?->is_irregular,
             'hours' => $offering->hours,
             // Needed so a subject dragged straight onto the grid can
             // compute its own hours-per-meeting client-side (see

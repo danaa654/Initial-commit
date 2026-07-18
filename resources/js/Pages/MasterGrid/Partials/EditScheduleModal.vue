@@ -86,6 +86,10 @@ const draft = reactive({
     // something to compute from even when these fields are hidden.
     hours: null,
     meetings_per_week: null,
+    // Mirrors facultyOverride below, one level down in the payload —
+    // see "Room Eligibility Override" docblock further down for why
+    // this one actually has to reach the server, unlike faculty's.
+    room_override: false,
 })
 
 /**
@@ -243,8 +247,24 @@ const dragOffset = reactive({ x: 0, y: 0 })
 // immediately and would otherwise reference this before it exists.
 const attemptedApplyWithoutFaculty = ref(false)
 
+// Identifies "this is a different block than what was last open" —
+// the ONE condition that should reset Override Eligibility/attempted-
+// apply state below. Anything else that touches props.blocks (every
+// single live validateDraft() round-trip while editing — picking a
+// Room, changing Day, toggling Override itself) must NOT reset these,
+// or the override the person just set gets silently reverted the
+// moment the next field-changed request resolves, well before they
+// ever click Apply. subject_offering_id is stable across all of that —
+// it only actually changes when this modal is reused for a genuinely
+// different block (Vue recycles component instances rather than
+// remounting them for every open/close).
+let lastEditedOfferingId = undefined
+
 watch(() => props.blocks, (blocks) => {
     if (!blocks.length) return
+
+    const isNewBlock = blocks[0].subject_offering_id !== lastEditedOfferingId
+    lastEditedOfferingId = blocks[0].subject_offering_id
 
     draft.faculty_id = blocks[0].faculty_id
     draft.room_id = blocks[0].room_id
@@ -253,12 +273,16 @@ watch(() => props.blocks, (blocks) => {
     draft.end_minutes = blocks[0].end_minutes
     draft.hours = blocks[0].hours ?? null
     draft.meetings_per_week = blocks[0].meetings_per_week || blocks.length || 1
-    facultyOverride.value = false
-    facultyDepartmentFilter.value = null
-    facultyDropdownOpen.value = false
-    attemptedApplyWithoutFaculty.value = false
-    dragOffset.x = 0
-    dragOffset.y = 0
+
+    if (isNewBlock) {
+        facultyOverride.value = false
+        facultyDepartmentFilter.value = null
+        facultyDropdownOpen.value = false
+        draft.room_override = false
+        attemptedApplyWithoutFaculty.value = false
+        dragOffset.x = 0
+        dragOffset.y = 0
+    }
 
     // draft.days (seeded from however many block rows came in) and
     // draft.meetings_per_week (seeded from the stored field above) are
@@ -506,6 +530,43 @@ const eligibleRooms = computed(() => {
 
     return list
 })
+
+/**
+ * Room Eligibility Override
+ * --------------------------------------------------------------
+ * Unlike Faculty (see the docblock below — that override is purely
+ * client-side, since nothing server-side ever checked faculty
+ * eligibility to begin with), Room eligibility IS enforced server-side
+ * — ScheduleValidationService raises real TYPE_ROOM_PROGRAM and
+ * TYPE_ROOM_TYPE conflicts, and both block Apply/Save exactly like a
+ * genuine double-booking would. So checking "Override Eligibility"
+ * here has to do two things, not one: widen the dropdown to every
+ * active room regardless of Allowed Programs OR Room Type, and flag
+ * draft.room_override so the server actually honors the choice
+ * instead of rejecting it as a conflict — see
+ * ScheduleValidationService::validateBlock()'s room checks, where both
+ * checks are downgraded to a warning rather than skipped outright, so
+ * the exception stays visible without being silently lost.
+ *
+ * Real cases this exists for: SHTM's HM/TM sections occasionally need
+ * to run a subject like ITE in one of CCS's computer labs (Allowed
+ * Programs override) — a legitimate cross-college room share the
+ * normal Allowed-list rule has no way to express ahead of time. Room
+ * Type is included too since the same kind of one-off exception can
+ * apply there — e.g. borrowing a Lab room for a Lecture session when
+ * every proper Lecture room is already booked that slot.
+ */
+const eligibleRoomsForType = computed(() => {
+    if (!props.block) return []
+
+    return props.rooms.filter((room) => {
+        if (room.active === false) return false
+
+        return draft.room_override || !props.block.room_type || room.room_type === props.block.room_type
+    })
+})
+
+const roomOptions = computed(() => draft.room_override ? eligibleRoomsForType.value : eligibleRooms.value)
 
 const eligibleFaculties = computed(() => {
     if (!props.block) return []
@@ -908,10 +969,33 @@ onBeforeUnmount(() => {
                         </div>
 
                         <div>
-                            <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Room</label>
-                            <select v-model.number="draft.room_id" :disabled="readOnly" class="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 text-sm px-2 py-1.5 focus:border-[#D4A62A] focus:outline-none focus:ring-2 focus:ring-[#D4A62A]/30 disabled:opacity-60 disabled:cursor-not-allowed" @change="emitChange">
-                                <option v-for="r in eligibleRooms" :key="r.id" :value="r.id">{{ r.room_code }} ({{ r.room_type }})</option>
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Room</label>
+                                <label
+                                    v-if="!readOnly"
+                                    class="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide cursor-pointer select-none"
+                                    :class="draft.room_override ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'"
+                                >
+                                    <input v-model="draft.room_override" type="checkbox" class="rounded" @change="emitChange" />
+                                    Override Eligibility
+                                </label>
+                            </div>
+                            <select
+                                v-model.number="draft.room_id"
+                                :disabled="readOnly"
+                                class="w-full rounded-lg border text-slate-800 dark:text-slate-100 text-sm px-2 py-1.5 focus:outline-none focus:ring-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                                :class="draft.room_override
+                                    ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-600 focus:border-amber-500 focus:ring-amber-400/30'
+                                    : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 focus:border-[#D4A62A] focus:ring-[#D4A62A]/30'"
+                                @change="emitChange"
+                            >
+                                <option v-for="r in roomOptions" :key="r.id" :value="r.id">{{ r.room_code }} ({{ r.room_type }})</option>
                             </select>
+                            <p v-if="draft.room_override" class="text-[11px] text-amber-600 dark:text-amber-400 font-semibold mt-1">
+                                ⚠ Every active room is available here, including a different Room Type (Lecture/Laboratory)
+                                or one outside this program's Allowed Rooms list. Use only for a genuine exception (e.g. an
+                                SHTM section borrowing a CCS computer lab for a subject like ITE).
+                            </p>
                         </div>
 
                         <div>

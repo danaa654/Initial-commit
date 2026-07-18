@@ -541,7 +541,7 @@ class SectionController extends Controller implements HasMiddleware
             'capacity' => [
                 'required',
                 'integer',
-                'between:20,45',
+                $request->boolean('is_irregular') ? 'between:1,45' : 'between:20,45',
             ],
 
             'status' => [
@@ -567,7 +567,9 @@ class SectionController extends Controller implements HasMiddleware
 
             'section_letter.in' => 'Section Letter must be one of A, B, C, D, or E.',
 
-            'capacity.between' => 'Capacity must be between 20 and 45 students.',
+            'capacity.between' => $request->boolean('is_irregular')
+                ? 'Capacity must be between 1 and 45 students.'
+                : 'Capacity must be between 20 and 45 students.',
 
         ]);
 

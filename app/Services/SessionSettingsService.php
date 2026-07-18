@@ -4,7 +4,9 @@ namespace App\Services;
 
 use App\Models\AcademicTerm;
 use App\Models\Faculty;
+use App\Models\IrregularSubjectFulfillment;
 use App\Models\Room;
+use App\Models\Section;
 use App\Models\SubjectOffering;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -56,11 +58,52 @@ class SessionSettingsService
             ->values()
             ->all();
 
+        $section = Section::find($filters['section_id']);
+
         return [
             'section_id' => $filters['section_id'],
+            'is_irregular' => (bool) $section?->is_irregular,
             'subjects' => $subjects,
             'has_offerings' => count($subjects) > 0,
+            // Subjects this Irregular Section already has covered by an
+            // existing Regular Section's Subject Offering (see
+            // SubjectOfferingController::storeIrregular()) — these
+            // deliberately never appear in $subjects above, since they
+            // don't need (and can't get) a schedule of their own: the
+            // students just sit in the Regular Section's already-
+            // scheduled class. Surfaced here purely so Session Settings
+            // doesn't look like it "lost" Subjects the Registrar
+            // remembers attaching.
+            'fulfilled_elsewhere' => $section?->is_irregular
+                ? $this->fulfilledElsewhere($section, $term)
+                : [],
         ];
+    }
+
+    /**
+     * Subjects fulfilled via an existing Regular Section's Subject
+     * Offering rather than one of this Section's own — same "will
+     * share that Section's class" signage shown on the Irregular
+     * Subject picker (see SubjectOfferingController::irregularSubjects()),
+     * repeated here so Session Settings carries the same story instead
+     * of silently only showing the subset that actually needs
+     * scheduling.
+     */
+    private function fulfilledElsewhere(Section $section, AcademicTerm $term): array
+    {
+        return IrregularSubjectFulfillment::where('section_id', $section->id)
+            ->whereHas('subjectOffering', fn ($q) => $q->where('academic_term_id', $term->id))
+            ->with(['subjectOffering.subject', 'subjectOffering.section'])
+            ->get()
+            ->map(fn (IrregularSubjectFulfillment $fulfillment) => [
+                'id' => $fulfillment->id,
+                'edp_code' => $fulfillment->subjectOffering?->edp_code,
+                'subject_code' => $fulfillment->subjectOffering?->subject?->subject_code,
+                'descriptive_title' => $fulfillment->subjectOffering?->subject?->descriptive_title,
+                'fulfilled_by_section' => $fulfillment->subjectOffering?->section?->section_code,
+            ])
+            ->values()
+            ->all();
     }
 
     /**
