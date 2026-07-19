@@ -96,6 +96,14 @@ const errorClass = 'mt-1.5 text-xs text-rose-500'
                             <EyeIcon v-else class="h-4 w-4" />
                         </button>
                     </div>
+                    <!-- Only shown while actually typing a new password —
+                         irrelevant noise otherwise, since leaving this
+                         blank means "keep the current password" and
+                         skips the rule entirely (see UserController::
+                         update()'s nullable password rule). -->
+                    <p v-if="form.password.length > 0" class="mt-1.5 text-xs text-[var(--text-muted)]">
+                        At least 6 characters.
+                    </p>
                     <p v-if="form.errors.password" :class="errorClass">{{ form.errors.password }}</p>
                 </div>
 

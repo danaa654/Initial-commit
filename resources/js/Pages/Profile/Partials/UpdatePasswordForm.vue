@@ -1,7 +1,10 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useForm } from '@inertiajs/vue3'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/vue/24/outline'
+import { useFlashToast } from '@/Composables/useFlashToast'
+
+const { show: showToast } = useFlashToast()
 
 const passwordInput = ref(null)
 const currentPasswordInput = ref(null)
@@ -16,10 +19,37 @@ const form = useForm({
     password_confirmation: '',
 })
 
+// Client-side-only heuristic, purely to give visual feedback while
+// typing — the server's Password::defaults() rule (min 8, mixed case,
+// numbers) is still the actual source of truth and gets the final say
+// via form.errors.password.
+const passwordStrength = computed(() => {
+    const value = form.password
+
+    if (! value) {
+        return null
+    }
+
+    let score = 0
+
+    if (value.length >= 8) score++
+    if (value.length >= 12) score++
+    if (/[a-z]/.test(value) && /[A-Z]/.test(value)) score++
+    if (/\d/.test(value)) score++
+    if (/[^A-Za-z0-9]/.test(value)) score++
+
+    if (score <= 1) return { label: 'Weak', level: 1, color: 'bg-rose-500', textColor: 'text-rose-500' }
+    if (score <= 3) return { label: 'Medium', level: 2, color: 'bg-amber-500', textColor: 'text-amber-500' }
+    return { label: 'Strong', level: 3, color: 'bg-emerald-500', textColor: 'text-emerald-500' }
+})
+
 function submit() {
     form.put('/password', {
         preserveScroll: true,
-        onSuccess: () => form.reset(),
+        onSuccess: () => {
+            form.reset()
+            showToast('Password updated successfully.', 'success')
+        },
         onError: () => {
             if (form.errors.password) {
                 form.reset('password', 'password_confirmation')
@@ -100,6 +130,31 @@ const errorClass = 'mt-1.5 text-xs text-rose-500'
                         <EyeIcon v-else class="h-4 w-4" />
                     </button>
                 </div>
+                <!-- Mirrors the server rule (Password::defaults() in
+                     AppServiceProvider) — shown up front so a weak
+                     password is caught here, not after a round trip
+                     to the server. -->
+                <p class="mt-1.5 text-xs text-[var(--text-muted)]">
+                    At least 8 characters, with an uppercase letter, a lowercase letter, and a number.
+                </p>
+
+                <!-- Client-side strength indicator — purely visual feedback
+                     while typing, the server rule above is still what's
+                     actually enforced. -->
+                <div v-if="passwordStrength" class="mt-2">
+                    <div class="flex gap-1">
+                        <span
+                            v-for="bar in 3"
+                            :key="bar"
+                            class="h-1.5 flex-1 rounded-full transition-colors duration-200"
+                            :class="bar <= passwordStrength.level ? passwordStrength.color : 'bg-[var(--card-border)]'"
+                        ></span>
+                    </div>
+                    <p class="mt-1 text-xs font-medium" :class="passwordStrength.textColor">
+                        {{ passwordStrength.label }} password
+                    </p>
+                </div>
+
                 <p v-if="form.errors.password" :class="errorClass">{{ form.errors.password }}</p>
             </div>
 

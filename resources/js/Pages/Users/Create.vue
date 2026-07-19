@@ -95,6 +95,13 @@ const errorClass = 'mt-1.5 text-xs text-rose-500'
                             <EyeIcon v-else class="h-4 w-4" />
                         </button>
                     </div>
+                    <!-- Mirrors the server rule (StoreUserRequest via
+                         UserController::store) — intentionally more relaxed
+                         than the strict Password::defaults() rule users hit
+                         when they change their own password from My Account. -->
+                    <p class="mt-1.5 text-xs text-[var(--text-muted)]">
+                        At least 6 characters.
+                    </p>
                     <p v-if="form.errors.password" :class="errorClass">{{ form.errors.password }}</p>
                 </div>
 

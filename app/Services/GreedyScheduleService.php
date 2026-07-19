@@ -1248,8 +1248,30 @@ class GreedyScheduleService
             // faculty_override/room_override. Lets EditScheduleModal
             // seed its checkboxes correctly when editing a Generate
             // Preview row, not just a fresh drag-and-drop.
-            'faculty_override' => (bool) ($offering->teachingAssignment?->is_override ?? false),
-            'room_override' => (bool) ($offering->preferredByRooms?->first()?->pivot?->is_override ?? false),
+            // Gated to faculty_source === 'assigned' — findPlacement()
+            // can fall back to an auto-picked faculty when the
+            // offering's assigned one is over cap or has no free slot
+            // anywhere (see findPlacement()'s "Falling back to
+            // automatic search" debug lines). When that happens, the
+            // faculty actually placed in THIS block is a different,
+            // fully scope-eligible person who never needed an
+            // override at all — reading is_override off the
+            // offering's teachingAssignment unconditionally would
+            // wrongly carry the ORIGINAL assigned faculty's override
+            // flag onto a block that isn't even using them anymore,
+            // pre-checking EditScheduleModal's Override Eligibility
+            // box for someone who doesn't need it.
+            'faculty_override' => $placement['faculty_source'] === 'assigned'
+                && (bool) ($offering->teachingAssignment?->is_override ?? false),
+            // Same room_id-match gate as faculty_override just above,
+            // same reason: candidateRooms() can place this offering in
+            // a DIFFERENT room than its Preferred Room whenever the
+            // preferred one has no free slot at the chosen day/time —
+            // in that case this block's room isn't the overridden one
+            // at all.
+            'room_override' => ($placement['room']->id ?? null)
+                && ($placement['room']->id ?? null) === $offering->preferredByRooms?->first()?->id
+                && (bool) ($offering->preferredByRooms?->first()?->pivot?->is_override ?? false),
 
             'room_id' => $placement['room']->id ?? null,
             'room_code' => $placement['room']->room_code ?? null,

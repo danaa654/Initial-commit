@@ -239,8 +239,33 @@ class MasterGridDataService
                         // idea on the unscheduled side. Re-opening an
                         // already-placed block through EditScheduleModal
                         // seeds its checkboxes from this the same way.
-                        'faculty_override' => (bool) ($s->subjectOffering?->teachingAssignment?->is_override ?? false),
-                        'room_override' => (bool) ($s->subjectOffering?->preferredByRooms?->first()?->pivot?->is_override ?? false),
+                        //
+                        // Gated on $s->faculty_id actually matching the
+                        // offering's teachingAssignment: a committed
+                        // Schedule row's faculty can be set independently
+                        // of Faculty Loading (someone picks a DIFFERENT
+                        // faculty directly in Master Grid's Edit
+                        // Schedule, without ever touching Subject
+                        // Offerings/Faculty Loading for this offering).
+                        // Without this check, that block would wrongly
+                        // inherit whatever override flag sits on the
+                        // OFFERING's Faculty Loading assignment — a
+                        // completely different, fully eligible person —
+                        // and pre-check Override Eligibility for someone
+                        // who never needed it. Same bug, same fix, as
+                        // GreedyScheduleService::presentBlock()'s
+                        // faculty_source === 'assigned' gate.
+                        'faculty_override' => $s->faculty_id
+                            && $s->faculty_id === $s->subjectOffering?->teachingAssignment?->faculty_id
+                            && (bool) ($s->subjectOffering?->teachingAssignment?->is_override ?? false),
+                        // Same room_id-match gate as faculty_override
+                        // above, same reason: this Schedule row's room
+                        // can differ from the offering's Preferred Room
+                        // pivot (a different room picked directly in
+                        // Master Grid, Subject Offerings never touched).
+                        'room_override' => $s->room_id
+                            && $s->room_id === $s->subjectOffering?->preferredByRooms?->first()?->id
+                            && (bool) ($s->subjectOffering?->preferredByRooms?->first()?->pivot?->is_override ?? false),
                         'room_id' => $s->room_id,
                         'room_code' => $s->room?->room_code,
                         'day' => $s->day,
