@@ -25,11 +25,15 @@ class TeachingAssignment extends Model
 
         'active',
 
+        'is_override',
+
     ];
 
     protected $casts = [
 
         'active' => 'boolean',
+
+        'is_override' => 'boolean',
 
     ];
 

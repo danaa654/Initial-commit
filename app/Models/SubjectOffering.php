@@ -230,7 +230,7 @@ class SubjectOffering extends Model
      */
     public function preferredByRooms()
     {
-        return $this->belongsToMany(Room::class, 'room_subject_offering')->withTimestamps();
+        return $this->belongsToMany(Room::class, 'room_subject_offering')->withPivot('is_override')->withTimestamps();
     }
 
     /**

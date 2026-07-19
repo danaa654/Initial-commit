@@ -1136,6 +1136,7 @@ class SubjectOfferingController extends Controller implements HasMiddleware
         $payload = [
             'subject_offering_id' => $subjectOffering->id,
             'faculty_id' => $validated['faculty_id'],
+            'is_override' => $override,
         ];
 
         // assertBusinessRules() re-checks scope/department/active-term/
@@ -1264,9 +1265,13 @@ class SubjectOfferingController extends Controller implements HasMiddleware
         // sync() with a single ID (or an empty array to clear) — an
         // Offering has at most one preferred Room, same "single
         // preference" shape getPreferredRoomAttribute() already
-        // assumes when it reads ->first() off this same pivot.
+        // assumes when it reads ->first() off this same pivot. The
+        // pivot's is_override records whether THIS pick was made
+        // through the checkbox above, so Master Grid can later tell
+        // an authorized exception apart from an ordinary preference —
+        // see MasterGridDataService::presentOffering().
         $subjectOffering->preferredByRooms()->sync(
-            $validated['room_id'] ? [$validated['room_id']] : []
+            $validated['room_id'] ? [$validated['room_id'] => ['is_override' => $override]] : []
         );
 
         $room = $validated['room_id'] ? Room::find($validated['room_id']) : null;

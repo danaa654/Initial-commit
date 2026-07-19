@@ -41,14 +41,21 @@ const props = defineProps({
     // True while a Remove Schedule request is in flight — disables
     // the Remove/Cancel/Apply buttons so a double-click can't fire two
     // deletes or a delete racing an Apply.
-    // True only for a "fresh placement" — a subject dragged straight
-    // onto the grid, or a Failed row being manually resolved from the
-    // Schedule Preview — where NOTHING has been committed for this
-    // offering yet, so Hours/Meetings-per-week are still safe to
-    // adjust here. False for editing an already-saved grid block:
-    // changing meeting count there means restructuring multiple
-    // existing day-rows, which this modal deliberately does not
-    // attempt (see the docblock above onMeetingsChange below).
+    // True whenever Hours/Meetings-per-week are safe to show and edit
+    // here: a fresh placement (a subject dragged straight onto the
+    // grid, or a Failed row being resolved from Schedule Preview)
+    // where nothing's committed yet, AND editing an already-saved
+    // grid block (Room View click on a placed class). Either way, a
+    // meetings_per_week change just means resubmitting THIS
+    // offering's full day-set on Apply — see Index.vue's applyEdit(),
+    // which rebuilds every row for the offering from scratch rather
+    // than patching in place, so growing OR shrinking the meeting
+    // count both work the same way master-grid.save() already
+    // supports server-side (it deletes any day not present in the
+    // submitted set — see MasterGridController::save()). False only
+    // for a 'preview' row from Generate Schedule that hasn't been
+    // individually opened yet — see the edit-block handler on the
+    // Schedule Preview's own Timetable instance.
     allowSessionSettings: { type: Boolean, default: false },
     removing: { type: Boolean, default: false },
 })
@@ -275,10 +282,18 @@ watch(() => props.blocks, (blocks) => {
     draft.meetings_per_week = blocks[0].meetings_per_week || blocks.length || 1
 
     if (isNewBlock) {
-        facultyOverride.value = false
-        facultyDepartmentFilter.value = null
+        // Faculty/Room may already have been assigned through Subject
+        // Offerings' own "Override Eligibility" checkbox — see
+        // MasterGridDataService::presentOffering()'s faculty_override/
+        // room_override. Seeding from that here means an exception
+        // already authorized there doesn't have to be re-declared from
+        // scratch the moment this same offering reaches Master Grid.
+        facultyOverride.value = !!blocks[0].faculty_override
+        facultyDepartmentFilter.value = facultyOverride.value
+            ? (blocks[0]?.department_id ?? 'none')
+            : null
         facultyDropdownOpen.value = false
-        draft.room_override = false
+        draft.room_override = !!blocks[0].room_override
         attemptedApplyWithoutFaculty.value = false
         dragOffset.x = 0
         dragOffset.y = 0
@@ -315,16 +330,17 @@ function onDayChange() {
 }
 
 /**
- * Only reachable when allowSessionSettings is true — i.e. this is a
- * fresh placement, not an edit of an already-saved multi-day block
- * (see that prop's docblock for why the two cases are kept separate).
- * Growing meetings_per_week resizes draft.days to match, seeding each
- * new slot with the first working day not already picked (falling
- * back to the first working day at all if every day is somehow
- * already used) — a placeholder the Registrar is expected to actually
- * review, not a finished answer. Shrinking just truncates the array;
- * nothing here has been saved yet, so there's no risk of silently
- * losing a real committed schedule row.
+ * Only reachable when allowSessionSettings is true (see that prop's
+ * docblock) — a fresh placement OR an edit of an already-saved
+ * multi-day block. Growing meetings_per_week resizes draft.days to
+ * match, seeding each new slot with the first working day not
+ * already picked (falling back to the first working day at all if
+ * every day is somehow already used) — a placeholder the Registrar
+ * is expected to actually review, not a finished answer. Shrinking
+ * just truncates the array; for an already-saved block, Apply then
+ * resubmits this offering's full (now-shorter) day-set, and
+ * master-grid.save() deletes whatever committed row(s) are no longer
+ * in it — see Index.vue's applyEdit().
  */
 function resizeDaysToMeetings() {
     const target = draft.meetings_per_week || 1
@@ -1189,13 +1205,13 @@ onBeforeUnmount(() => {
                     <!--
                         Meeting-split suggestions ("meet more often, for
                         less time each" — see ScheduleRecommendationService::
-                        suggestMeetingSplits()). Gated to allowSessionSettings
-                        ONLY: accepting one of these changes meetings_per_week,
-                        which onMeetingsChange's own docblock says is only
-                        safe for a fresh placement, never an edit of an
-                        already-saved multi-day grid block. Editing a saved
-                        block simply never shows this section, same as it
-                        never lets Hours/Meetings-per-week be touched at all.
+                        suggestMeetingSplits()). Gated to allowSessionSettings,
+                        same as the Hours/Meetings-per-week fields
+                        themselves above — both a fresh placement and
+                        editing an already-saved grid block now have it
+                        on; only a 'preview' row not yet individually
+                        opened has it off. See allowSessionSettings'
+                        own docblock.
                     -->
                     <div v-if="allowSessionSettings && recommendations.meeting_splits?.length">
                         <p class="text-[11px] font-black uppercase tracking-wide text-slate-500 mb-1.5">Or Meet More Often</p>

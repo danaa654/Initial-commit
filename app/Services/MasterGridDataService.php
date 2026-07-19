@@ -213,7 +213,7 @@ class MasterGridDataService
             // previous Save Schedule run) even before a new Generate
             // is run in this session.
             'savedSchedules' => Schema::hasTable('schedules')
-                ? Schedule::with(['subjectOffering.subject', 'subjectOffering.section', 'subjectOffering.program', 'faculty', 'room'])
+                ? Schedule::with(['subjectOffering.subject', 'subjectOffering.section', 'subjectOffering.program', 'subjectOffering.teachingAssignment', 'subjectOffering.preferredByRooms', 'faculty', 'room'])
                     ->forTerm($activeTerm->id)
                     ->get()
                     ->map(fn (Schedule $s) => [
@@ -232,6 +232,15 @@ class MasterGridDataService
                         'classification' => $s->subjectOffering?->classification,
                         'faculty_id' => $s->faculty_id,
                         'faculty_name' => $s->faculty?->full_name,
+                        // Whether the offering's CURRENT Faculty/Room
+                        // preference (Subject Offerings) was set via
+                        // Override Eligibility — see presentOffering()'s
+                        // faculty_override/room_override for the same
+                        // idea on the unscheduled side. Re-opening an
+                        // already-placed block through EditScheduleModal
+                        // seeds its checkboxes from this the same way.
+                        'faculty_override' => (bool) ($s->subjectOffering?->teachingAssignment?->is_override ?? false),
+                        'room_override' => (bool) ($s->subjectOffering?->preferredByRooms?->first()?->pivot?->is_override ?? false),
                         'room_id' => $s->room_id,
                         'room_code' => $s->room?->room_code,
                         'day' => $s->day,
@@ -381,7 +390,19 @@ class MasterGridDataService
             // existing Faculty Loading assignment is dragged straight
             // onto the grid.
             'faculty_id' => $offering->teachingAssignment?->faculty_id,
-            'preferred_room_code' => $preferredRoomByOffering[$offering->id] ?? null,
+            // Whether the Faculty above was assigned through Subject
+            // Offerings' "Override Eligibility" checkbox — lets
+            // EditScheduleModal start its own Faculty Override
+            // checkbox pre-checked instead of the person having to
+            // re-declare an exception that was already authorized
+            // once (see SubjectOfferingController::assignFaculty()).
+            'faculty_override' => (bool) ($offering->teachingAssignment?->is_override ?? false),
+            'preferred_room_code' => $preferredRoomByOffering[$offering->id]['room_code'] ?? null,
+            // Same idea as faculty_override, for the Room field — set
+            // when the Preferred Room above was picked through Subject
+            // Offerings' Override Eligibility checkbox (see
+            // SubjectOfferingController::setPreferredRoom()).
+            'room_override' => $preferredRoomByOffering[$offering->id]['is_override'] ?? false,
             'overall_status' => $overallStatus,
             'is_scheduled' => in_array($overallStatus, [
                 SubjectOffering::STATUS_SCHEDULED,
@@ -493,10 +514,17 @@ class MasterGridDataService
     }
 
     /**
-     * subject_offering_id => first preferred room's room_code, sourced
-     * from the room_subject_offering pivot (Room::preferredSubjectOfferings()).
-     * A room preference is a many-to-many, but the Subject Card only
-     * has room for one "Preferred Room" label — first match wins.
+     * subject_offering_id => ['room_code' => ..., 'is_override' => bool],
+     * sourced from the room_subject_offering pivot (Room::
+     * preferredSubjectOfferings()). A room preference is a
+     * many-to-many, but the Subject Card only has room for one
+     * "Preferred Room" label — first match wins. is_override reflects
+     * whether that preference was set through Subject Offerings'
+     * "Override Eligibility" checkbox (see SubjectOfferingController::
+     * setPreferredRoom()) — Master Grid reads it in presentOffering()
+     * below so a Subject Offerings override doesn't have to be
+     * re-declared from scratch when the same offering reaches
+     * EditScheduleModal.
      */
     private function preferredRoomByOffering(int $academicTermId): array
     {
@@ -509,9 +537,12 @@ class MasterGridDataService
             ->join('subject_offerings', 'subject_offerings.id', '=', 'room_subject_offering.subject_offering_id')
             ->where('subject_offerings.academic_term_id', $academicTermId)
             ->orderBy('room_subject_offering.id')
-            ->get(['room_subject_offering.subject_offering_id', 'rooms.room_code'])
+            ->get(['room_subject_offering.subject_offering_id', 'rooms.room_code', 'room_subject_offering.is_override'])
             ->groupBy('subject_offering_id')
-            ->map(fn ($rows) => $rows->first()->room_code)
+            ->map(fn ($rows) => [
+                'room_code' => $rows->first()->room_code,
+                'is_override' => (bool) $rows->first()->is_override,
+            ])
             ->all();
     }
 

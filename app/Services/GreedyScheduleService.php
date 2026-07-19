@@ -304,6 +304,7 @@ class GreedyScheduleService
         $offerings = SubjectOffering::with([
                 'subject.roomGroups',
                 'teachingAssignment.faculty',
+                'preferredByRooms',
                 'program.department',
                 'section',
                 // Needed for the specialization filter below — a
@@ -1241,6 +1242,14 @@ class GreedyScheduleService
             'faculty_id' => $faculty?->id,
             'faculty_name' => $faculty?->full_name,
             'faculty_source' => $placement['faculty_source'] ?? null, // 'assigned' | 'auto' | null
+            // Whether the offering's CURRENT Faculty/Room preference
+            // (Subject Offerings) was set via Override Eligibility —
+            // same idea as MasterGridDataService::presentOffering()'s
+            // faculty_override/room_override. Lets EditScheduleModal
+            // seed its checkboxes correctly when editing a Generate
+            // Preview row, not just a fresh drag-and-drop.
+            'faculty_override' => (bool) ($offering->teachingAssignment?->is_override ?? false),
+            'room_override' => (bool) ($offering->preferredByRooms?->first()?->pivot?->is_override ?? false),
 
             'room_id' => $placement['room']->id ?? null,
             'room_code' => $placement['room']->room_code ?? null,

@@ -136,6 +136,7 @@ class Room extends Model
     public function preferredSubjectOfferings()
     {
         return $this->belongsToMany(SubjectOffering::class, 'room_subject_offering')
+            ->withPivot('is_override')
             ->withTimestamps();
     }
 

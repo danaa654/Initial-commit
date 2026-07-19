@@ -483,6 +483,7 @@ function openEditModal(input, context = 'grid', { allowSessionSettings: allowSet
         validateDraft({
             faculty_id: group[0]?.faculty_id ?? null,
             room_id: group[0]?.room_id ?? null,
+            room_override: group[0]?.room_override ?? false,
             days: group.map((b) => b.day),
             start_minutes: group[0]?.start_minutes ?? null,
             end_minutes: group[0]?.end_minutes ?? null,
@@ -536,6 +537,16 @@ function handleDropSubject({ subjectOfferingId, roomId, day, startMinutes }) {
         room_type: offering.room_type,
         faculty_id: offering.faculty_id ?? null,
         faculty_name: offering.faculty_assigned ?? null,
+        // See EditScheduleModal's blocks watcher — seeds its Override
+        // Eligibility checkboxes from whatever was already authorized
+        // on Subject Offerings, so it doesn't have to be re-declared.
+        // Faculty is the same assignment regardless of which room it
+        // lands on; Room only carries the override forward if this
+        // drop happened to land on the SAME room that was overridden
+        // there (a drop onto a different room is a fresh pick, not a
+        // continuation of that exception).
+        faculty_override: !!offering.faculty_override,
+        room_override: !!(offering.room_override && room?.room_code === offering.preferred_room_code),
         room_id: roomId,
         room_code: room?.room_code ?? null,
         day,
@@ -606,6 +617,13 @@ function handleSubjectCardClick(offering) {
         room_type: offering.room_type,
         faculty_id: offering.faculty_id ?? null,
         faculty_name: offering.faculty_assigned ?? null,
+        // See EditScheduleModal's blocks watcher — the Room here is
+        // always the offering's own Preferred Room (just resolved
+        // above), so its override flag can pass straight through
+        // unconditionally, unlike handleDropSubject where the dropped
+        // room might not be the same one.
+        faculty_override: !!offering.faculty_override,
+        room_override: !!offering.room_override,
         room_id: preferredRoom?.id ?? null,
         room_code: preferredRoom?.room_code ?? null,
         day: defaultDay,
@@ -619,6 +637,7 @@ function handleSubjectCardClick(offering) {
         validateDraft({
             faculty_id: block.faculty_id,
             room_id: block.room_id,
+            room_override: block.room_override,
             days: [block.day],
             start_minutes: block.start_minutes,
             end_minutes: block.end_minutes,
@@ -949,28 +968,22 @@ async function applyEdit(fields) {
     // an unresolved conflict still blocks it outright.
     if (currentConflicts.value.length > 0) return
 
-    const mergedBlocks = [...scheduledEvents.value]
+    // Rebuilds every row for THIS offering from scratch (drop the old
+    // set, push the new one) rather than patching matched indices in
+    // place. A plain patch-in-place only ever touches indices that
+    // still exist in the new `days` array — if Meetings/Week just
+    // went from 2x down to 1x, the old second day's row would never
+    // get removed from mergedBlocks, and master-grid.save would still
+    // receive it as if nothing changed (its own cleanup only deletes
+    // days it was NOT told about — see MasterGridController::save()'s
+    // "old second day's row would otherwise be orphaned" comment,
+    // which only helps if the stale row isn't still being resubmitted
+    // here). Filtering first means growing AND shrinking both just
+    // fall out of the same "push one row per day in `days`" loop.
+    const offeringId = editingGroup.value[0]?.subject_offering_id ?? editingBlock.value?.subject_offering_id
+    const mergedBlocks = scheduledEvents.value.filter((event) => event.subject_offering_id !== offeringId)
 
-    days.forEach((_, i) => {
-        const template = editingGroup.value[i]
-        const patch = patchFor(i)
-
-        if (template) {
-            const idx = mergedBlocks.findIndex(
-                (event) => event.subject_offering_id === template.subject_offering_id && event.day === template.day
-            )
-            if (idx !== -1) {
-                mergedBlocks[idx] = { ...mergedBlocks[idx], ...patch }
-                return
-            }
-        }
-
-        // No existing sibling to patch — either a brand-new placement
-        // (drag-and-drop, or a Failed row resolved straight on the
-        // grid) or an extra meeting day added past the original
-        // group's length. Either way, this is a new committed row.
-        mergedBlocks.push(patch)
-    })
+    days.forEach((_, i) => mergedBlocks.push(patchFor(i)))
 
     saving.value = true
     saveError.value = null
@@ -1126,7 +1139,7 @@ const hasActiveTerm = computed(() => !!props.activeTerm)
                     :can-manage="canManage"
                     :conflicting-ids="conflictingIds"
                     :dragged-offering="draggedOffering"
-                    @edit-block="openEditModal"
+                    @edit-block="(block) => openEditModal(block, 'grid', { allowSessionSettings: true })"
                     @select-room="selectRoom"
                     @drop-subject="handleDropSubject"
                     @drop-rejected="handleDropRejected"
